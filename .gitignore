@@ -1,0 +1,17 @@
+# Roblox files
+*.rbxl.lock
+
+# Build artifacts
+build/
+dist/
+
+# IDE files
+.vscode/
+*.code-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
