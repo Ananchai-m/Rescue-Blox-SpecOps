@@ -37,7 +37,6 @@ local throttleInput = 0
 local steerInput = 0
 local vehicleParts = {}
 local manualVehicle = nil
-local companionFollowConnection = nil
 
 -- Wheel smoothing variables
 local wheelControlState = {}
@@ -72,51 +71,53 @@ local humanoidScanConnection = nil
 
 -- ฟังก์ชันให้ companion ตามผู้เล่นเมื่อไม่ได้ควบคุม
 local function startCompanionFollow()
-	if companionFollowConnection then return end
-	
-	companionFollowConnection = RunService.Heartbeat:Connect(function()
-		if not rescueModel or not rescueModel.PrimaryPart or not character or not character.PrimaryPart then return end
-		if isRescueMode then return end -- ไม่ตามเมื่อกำลังควบคุม
-		
-		local playerPosition = character.PrimaryPart.Position
-		local playerCFrame = character.PrimaryPart.CFrame
-		local companionPosition = rescueModel.PrimaryPart.Position
-		
-		-- คำนวณตำแหน่งข้างขวาผู้เล่น (วิ่งไปพร้อมกัน)
-		local sideOffset = playerCFrame.RightVector * 6 -- 6 studs ข้างขวา
-		local targetPos = playerPosition + sideOffset
-		targetPos = Vector3.new(targetPos.X, playerPosition.Y, targetPos.Z) -- ใช้ Y เดียวกันกับผู้เล่น
-		
-		local distance = (targetPos - companionPosition).Magnitude
-		
-		-- ถ้าห่างเกิน 8 studs ให้ตาม
-		if distance > 8 then
-			local direction = (targetPos - companionPosition).Unit
-			local moveSpeed = math.min(distance * 0.06, 2) -- ลดความเร็วให้ช้าลง
-			local newPosition = companionPosition + direction * moveSpeed
-			
-			-- หันหน้าไปทางเดียวกับผู้เล่น
-			local lookDirection = playerCFrame.LookVector
-			rescueModel:SetPrimaryPartCFrame(CFrame.lookAt(newPosition, newPosition + lookDirection))
-		elseif distance > 1 then
-			-- ปรับทิศทางเดียวกับผู้เล่น
-			local lookDirection = playerCFrame.LookVector
-			rescueModel:SetPrimaryPartCFrame(CFrame.lookAt(companionPosition, companionPosition + lookDirection))
+	print("DEBUG: startCompanionFollow called")
+	if isRescueMode then
+		print("DEBUG: In rescue mode, not starting follow")
+		return
+	end
+	if not rescueModel then
+		print("DEBUG: No rescueModel found")
+		return
+	end
+	if not rescueModel.PrimaryPart then
+		print("DEBUG: rescueModel has no PrimaryPart")
+		return
+	end
+	if not character then
+		print("DEBUG: No character found")
+		return
+	end
+
+	local function getPlayerRoot()
+		if character and character.Parent and character.PrimaryPart then
+			return character.PrimaryPart
 		end
-	end)
+		return nil
+	end
+
+	local function sendControls(throttle, steer)
+		throttleInput = throttle
+		steerInput = steer
+		controlEvent:FireServer(throttle, steer)
+	end
+
+	local function stopControls()
+		throttleInput = 0
+		steerInput = 0
+		stopControlEvent:FireServer()
+	end
 end
 
 local function stopCompanionFollow()
-	if companionFollowConnection then
-		companionFollowConnection:Disconnect()
-		companionFollowConnection = nil
-	end
+	throttleInput = 0
+	steerInput = 0
+	stopControlEvent:FireServer()
 end
 
 local function disconnectAll()
 	if connectionSteer then connectionSteer:Disconnect(); connectionSteer = nil end
 	if connectionThrottle then connectionThrottle:Disconnect(); connectionThrottle = nil end
-	stopCompanionFollow()
 	for _, connection in pairs(connections) do
 		if connection then
 			connection:Disconnect()
@@ -851,6 +852,14 @@ end
 
 character:WaitForChild("Humanoid").Seated:Connect(function(active, seatPart)
 	-- ตัดการเชื่อมต่อเก่าเสมอ
+	if seatPart and rescueModel and seatPart:IsDescendantOf(rescueModel) then
+		humanoid.Sit = false
+		if seatPart.Occupant then
+			seatPart.Occupant.Sit = false
+		end
+		return
+	end
+
 	disconnectAll()
 
 	-- ถ้าไม่ได้กำลังนั่ง หรือไม่มีที่นั่ง ให้จบ
@@ -1060,6 +1069,7 @@ end)
 local function spawnRescueCompanion()
 	if rescueModel then
 		-- ถ้ามี companion อยู่แล้ว ให้ลบก่อน
+		stopCompanionFollow()
 		rescueModel:Destroy()
 		rescueModel = nil
 	end
@@ -1075,22 +1085,41 @@ local function spawnRescueCompanion()
 	if character and character.PrimaryPart then
 		local playerPosition = character.PrimaryPart.Position
 		local playerCFrame = character.PrimaryPart.CFrame
-		-- วางข้างขวาผู้เล่น 6 studs
-		local sideOffset = playerCFrame.RightVector * 6
-		local companionPosition = playerPosition + sideOffset
-		companionPosition = Vector3.new(companionPosition.X, playerPosition.Y, companionPosition.Z)
+			-- วางด้านข้างผู้เล่น 2 studs ใกล้ขึ้น
+			local sideOffset = playerCFrame.RightVector * 2
+			local companionPosition = playerPosition + sideOffset
+			companionPosition = Vector3.new(companionPosition.X, playerPosition.Y, companionPosition.Z)
 		local lookDirection = playerCFrame.LookVector
 
+		print("DEBUG: Sending spawn request to server")
 		spawnCompanionEvent:FireServer(companionPosition, lookDirection)
 
-		-- หา companion ที่ server สร้าง
-		wait(0.1)
-		rescueModel = workspace:FindFirstChild(player.Name .. "_RescueCompanion")
+		-- รอให้ server สร้าง companion และลองหาหลายครั้ง
+		local attempts = 0
+		local maxAttempts = 20
+		while attempts < maxAttempts do
+			wait(0.1)
+			rescueModel = workspace:FindFirstChild(player.Name .. "_RescueCompanion")
+			if rescueModel then
+				print("DEBUG: Found companion model after", attempts + 1, "attempts")
+				break
+			end
+			attempts = attempts + 1
+		end
+
+		if not rescueModel then
+			warn("DEBUG: Failed to find companion model after", maxAttempts, "attempts")
+			return
+		end
 	end
-	
-	print("RescueCompanion spawned near player")
-	-- เริ่มควบคุมทันทีแทนการตามผู้เล่น (ไม่ปรับ camera)
-	startRescueMode(false) -- false = ไม่ใช้ camera
+
+	print("DEBUG: RescueCompanion spawned near player")
+	if not isRescueMode then
+		print("DEBUG: Starting companion follow")
+		startCompanionFollow()
+	else
+		print("DEBUG: In rescue mode, not starting follow")
+	end
 	return rescueModel
 end
 
@@ -1334,15 +1363,6 @@ end
 -- Input handling
 connections.inputBegan = UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
-
-	-- กด R เพื่อเริ่มควบคุม RescueCompanion (ไม่มี camera)
-	if input.KeyCode == Enum.KeyCode.R then
-		if not isRescueMode then
-			startRescueMode(false) -- false = ไม่ใช้ camera
-		else
-			stopRescueMode()
-		end
-	end
 
 	if input.KeyCode == Enum.KeyCode.F then
 		if originalRescueModel then

@@ -3,37 +3,36 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 -- สร้าง RemoteEvents สำหรับสื่อสารกับ client
-local remoteEvents = Instance.new("Folder")
-remoteEvents.Name = "RescueBotRemotes"
-remoteEvents.Parent = ReplicatedStorage
+local remoteEventsFolder = ReplicatedStorage:FindFirstChild("RescueBotRemotes")
+if not remoteEventsFolder then
+	remoteEventsFolder = Instance.new("Folder")
+	remoteEventsFolder.Name = "RescueBotRemotes"
+	remoteEventsFolder.Parent = ReplicatedStorage
+end
 
-local spawnCompanionEvent = Instance.new("RemoteEvent")
-spawnCompanionEvent.Name = "SpawnCompanion"
-spawnCompanionEvent.Parent = remoteEvents
+local function getOrCreateRemote(name)
+	local remote = remoteEventsFolder:FindFirstChild(name)
+	if remote then
+		if remote:IsA("RemoteEvent") then
+			return remote
+		end
+		remote:Destroy()
+	end
 
-local controlEvent = Instance.new("RemoteEvent")
-controlEvent.Name = "ControlVehicle"
-controlEvent.Parent = remoteEvents
+	remote = Instance.new("RemoteEvent")
+	remote.Name = name
+	remote.Parent = remoteEventsFolder
+	return remote
+end
 
-local stopControlEvent = Instance.new("RemoteEvent")
-stopControlEvent.Name = "StopControl"
-stopControlEvent.Parent = remoteEvents
-
-local hydraulicRemote = Instance.new("RemoteEvent")
-hydraulicRemote.Name = "ActivateHydraulic"
-hydraulicRemote.Parent = remoteEvents
-
-local spawnOriginalRescueEvent = Instance.new("RemoteEvent")
-spawnOriginalRescueEvent.Name = "SpawnOriginalRescue"
-spawnOriginalRescueEvent.Parent = remoteEvents
-
-local controlOriginalRescueEvent = Instance.new("RemoteEvent")
-controlOriginalRescueEvent.Name = "ControlOriginalRescue"
-controlOriginalRescueEvent.Parent = remoteEvents
-
-local stopOriginalRescueEvent = Instance.new("RemoteEvent")
-stopOriginalRescueEvent.Name = "StopOriginalRescue"
-stopOriginalRescueEvent.Parent = remoteEvents
+local spawnCompanionEvent = getOrCreateRemote("SpawnCompanion")
+local controlEvent = getOrCreateRemote("ControlVehicle")
+local stopControlEvent = getOrCreateRemote("StopControl")
+local hydraulicRemote = getOrCreateRemote("ActivateHydraulic")
+local spawnOriginalRescueEvent = getOrCreateRemote("SpawnOriginalRescue")
+local controlOriginalRescueEvent = getOrCreateRemote("ControlOriginalRescue")
+local stopOriginalRescueEvent = getOrCreateRemote("StopOriginalRescue")
+local CompanionFollower = require(script.Parent:WaitForChild("CompanionFollower"))
 
 -- เก็บข้อมูลรถของแต่ละผู้เล่น
 local playerVehicles = {}
@@ -156,10 +155,46 @@ spawnCompanionEvent.OnServerEvent:Connect(function(player, position, orientation
 
 	local companion = rescueTemplate:Clone()
 	companion.Name = player.Name .. "_RescueCompanion"
+	companion:SetAttribute("OwnerUserId", player.UserId)
+	companion:SetAttribute("OwnerName", player.Name)
+
+	-- ใส่ใน workspace ก่อน
 	companion.Parent = workspace
 
-	if companion.PrimaryPart and position then
-		companion:SetPrimaryPartCFrame(CFrame.new(position, position + orientation))
+	-- คำนวณตำแหน่ง spawn
+	local spawnPosition = position
+	local spawnLook = orientation
+
+	local character = player.Character
+	if character and character.PrimaryPart then
+		local charPrimary = character.PrimaryPart
+		local rightVector = charPrimary.CFrame.RightVector
+		spawnPosition = (charPrimary.Position + rightVector * 2)
+		spawnLook = charPrimary.CFrame.LookVector
+	elseif not spawnPosition then
+		spawnPosition = Vector3.new(0, 10, 0)
+		spawnLook = Vector3.new(0, 0, -1)
+	elseif not spawnLook then
+		spawnLook = Vector3.new(0, 0, -1)
+	end
+
+	-- ใช้ PivotTo เพื่อตั้งตำแหน่งหลังจากใส่ใน workspace แล้ว
+	companion:PivotTo(CFrame.new(spawnPosition, spawnPosition + spawnLook))
+
+	CompanionFollower.start(companion)
+
+	local vehicleSeat = companion:FindFirstChildWhichIsA("VehicleSeat", true)
+	if vehicleSeat then
+		vehicleSeat:GetPropertyChangedSignal("Occupant"):Connect(function()
+			local occupant = vehicleSeat.Occupant
+			if occupant then
+				task.defer(function()
+					if vehicleSeat.Occupant == occupant then
+						occupant.Sit = false
+					end
+				end)
+			end
+		end)
 	end
 
 	playerVehicles[player] = companion
