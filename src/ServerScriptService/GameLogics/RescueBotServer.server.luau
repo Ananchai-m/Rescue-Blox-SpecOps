@@ -37,10 +37,10 @@ local CompanionFollower = require(script.Parent:WaitForChild("CompanionFollower"
 -- เก็บข้อมูลรถของแต่ละผู้เล่น
 local playerVehicles = {}
 local vehicleConnections = {}
-local playerHydraulicArms = {}
+local playerDrillStates = {}
 local playerOriginalRescue = {}
 local originalRescueConnections = {}
-local hydraulicDebounce = {} -- ป้องกันการคลิกเร็วเกินไป
+local drillDebounce = {} -- ป้องกันการคลิกเร็วเกินไป
 
 local function sign(x)
 	if x > 0 then return 1 elseif x < 0 then return -1 else return 0 end
@@ -69,12 +69,33 @@ local function updateVehicleControl(player, vehicle, throttleInput, steerInput)
 
 	if not (cylindricalBL and cylindricalBR) then return end
 
-	-- Set network ownership
-	primary:SetNetworkOwner(player)
-	if wheelBL then wheelBL:SetNetworkOwner(player) end
-	if wheelBR then wheelBR:SetNetworkOwner(player) end
-	if wheelFL then wheelFL:SetNetworkOwner(player) end
-	if wheelFR then wheelFR:SetNetworkOwner(player) end
+	-- Set network ownership (skip while anchored to avoid errors)
+	if primary.Anchored then
+		pcall(function()
+			primary:SetNetworkOwner(nil)
+		end)
+		if wheelBL then pcall(function() wheelBL:SetNetworkOwner(nil) end) end
+		if wheelBR then pcall(function() wheelBR:SetNetworkOwner(nil) end) end
+		if wheelFL then pcall(function() wheelFL:SetNetworkOwner(nil) end) end
+		if wheelFR then pcall(function() wheelFR:SetNetworkOwner(nil) end) end
+
+		local function brakeConstraint(constraint)
+			if not constraint then return end
+			constraint.AngularVelocity = 0
+			constraint.MotorMaxTorque = 0
+		end
+		brakeConstraint(cylindricalBL)
+		brakeConstraint(cylindricalBR)
+		brakeConstraint(cylindricalFL)
+		brakeConstraint(cylindricalFR)
+		return
+	else
+		primary:SetNetworkOwner(player)
+		if wheelBL then wheelBL:SetNetworkOwner(player) end
+		if wheelBR then wheelBR:SetNetworkOwner(player) end
+		if wheelFL then wheelFL:SetNetworkOwner(player) end
+		if wheelFR then wheelFR:SetNetworkOwner(player) end
+	end
 
 	-- Steering
 	if attachmentFL and attachmentFR then
@@ -241,80 +262,259 @@ stopControlEvent.OnServerEvent:Connect(function(player)
 	end
 end)
 
--- ฟังก์ชันหา hydraulic arm ของผู้เล่น
-local function findPlayerHydraulicArm(player)
-	-- หาจาก Rescue model ที่ผู้เล่นกำลังใช้
-	print("Searching in workspace for Rescue models...")
-	for _, model in pairs(workspace:GetChildren()) do
+-- ฟังก์ชันหา DrillArm ของผู้เล่น
+local function findPlayerDrillHinge(player)
+	for _, model in ipairs(workspace:GetChildren()) do
 		if model:IsA("Model") and model.Name == player.Name .. "_Rescue" then
-			print("Found potential model:", model.Name)
-			local hydroArm = model:FindFirstChild("hydoclicArm")
-			if hydroArm then
-				print("Found hydoclicArm in", model.Name)
-				local shalf = hydroArm:FindFirstChild("Shalf") or hydroArm:FindFirstChild("Shelf")
-				if shalf then
-					print("Found Shalf/Shelf:", shalf.Name, "in", model.Name)
-					local pc = shalf:FindFirstChild("PrismaticConstraint")
-					if pc then
-						print("SUCCESS: Found PrismaticConstraint in", model.Name)
-						return pc
-					else
-						print("ERROR: No PrismaticConstraint in", shalf.Name)
+			local drillArm = model:FindFirstChild("DrillArm")
+			if drillArm then
+				local head = drillArm:FindFirstChild("Head")
+				if head and head:IsA("BasePart") then
+					local hinge = head:FindFirstChildOfClass("HingeConstraint")
+					if hinge then
+						return hinge, model
 					end
-				else
-					print("ERROR: No Shalf/Shelf in hydoclicArm of", model.Name)
 				end
-			else
-				print("No hydoclicArm in", model.Name)
 			end
 		end
 	end
-
-	print("=== END DEBUG: No hydraulic arm found anywhere")
-	return nil
+	return nil, nil
 end
 
--- Hydraulic arm control
+local MAX_COMBO = 5
+local BASE_SPEED = 18
+local SPEED_STEP = 12
+local BASE_TORQUE = 12000
+local TORQUE_STEP = 18000
+local COMBO_TIMEOUT = 1.5
+
+local function applyDrillSpin(player, state)
+	local hinge = state.hinge
+	if not hinge then
+		return
+	end
+	state.isActive = true
+	state.combo = math.clamp(state.combo, 1, MAX_COMBO)
+
+	if hinge.ActuatorType ~= Enum.ActuatorType.Motor then
+		hinge.ActuatorType = Enum.ActuatorType.Motor
+	end
+
+	local head = hinge.Parent
+	if head and head:IsA("BasePart") then
+		if state.head ~= head then
+			state.head = head
+			state.originalMassless = head.Massless
+			state.originalPhysicalProperties = head.CustomPhysicalProperties
+		end
+		head.Massless = true
+		pcall(function()
+			head.CustomPhysicalProperties = PhysicalProperties.new(0.1, 0.3, 0.3)
+		end)
+	end
+
+	local model = state.model
+	if model and model.PrimaryPart then
+		if not state.anchorInfo then
+			state.anchorInfo = {
+				part = model.PrimaryPart,
+				wasAnchored = model.PrimaryPart.Anchored,
+			}
+			state.wheelConstraints = {}
+			state.anchoredParts = {}
+			local drillArm = model:FindFirstChild("DrillArm")
+			for _, descendant in ipairs(model:GetDescendants()) do
+				if descendant:IsA("BasePart") then
+					if drillArm and drillArm:IsAncestorOf(descendant) then
+						continue
+					end
+					table.insert(state.anchoredParts, {
+						part = descendant,
+						wasAnchored = descendant.Anchored,
+					})
+					descendant.Anchored = true
+					descendant.AssemblyLinearVelocity = Vector3.zero
+					descendant.AssemblyAngularVelocity = Vector3.zero
+				end
+			end
+			local function disableConstraint(wheel)
+				if not wheel then return end
+				local constraint = wheel:FindFirstChildOfClass("CylindricalConstraint")
+				if constraint then
+					state.wheelConstraints[constraint] = {
+						enabled = constraint.Enabled,
+						angularVelocity = constraint.AngularVelocity,
+						motorTorque = constraint.MotorMaxTorque,
+					}
+					constraint.AngularVelocity = 0
+					constraint.MotorMaxTorque = 0
+					constraint.Enabled = false
+				end
+			end
+			disableConstraint(model:FindFirstChild("Wheel_BL"))
+			disableConstraint(model:FindFirstChild("Wheel_BR"))
+			disableConstraint(model:FindFirstChild("Wheel_FL"))
+			disableConstraint(model:FindFirstChild("Wheel_FR"))
+		end
+	end
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		if state.humanoid ~= humanoid then
+			state.humanoid = humanoid
+			state.originalWalkSpeed = humanoid.WalkSpeed
+			state.originalAutoRotate = humanoid.AutoRotate
+		end
+		if not state.walkSuppressed then
+			state.originalWalkSpeed = humanoid.WalkSpeed
+			state.originalAutoRotate = humanoid.AutoRotate
+			humanoid.WalkSpeed = 0
+			humanoid.AutoRotate = false
+			state.walkSuppressed = true
+		end
+	end
+
+	local speed = BASE_SPEED + (state.combo - 1) * SPEED_STEP
+	local torque = BASE_TORQUE + (state.combo - 1) * TORQUE_STEP
+	pcall(function()
+		hinge.AngularSpeed = speed
+		hinge.MotorMaxTorque = torque
+		hinge.AngularResponsiveness = 80
+	end)
+end
+
+local function stopDrillSpin(state)
+	if not state then
+		return
+	end
+	if state.isActive then
+		return
+	end
+	local hinge = state.hinge
+	if hinge then
+		pcall(function()
+			hinge.AngularSpeed = 0
+			hinge.MotorMaxTorque = 0
+		end)
+	end
+	if state.anchoredParts then
+		for _, info in ipairs(state.anchoredParts) do
+			local part = info.part
+			if part then
+				pcall(function()
+					part.Anchored = info.wasAnchored and true or false
+				end)
+			end
+		end
+		state.anchoredParts = nil
+	end
+	if state.anchorInfo and state.anchorInfo.part then
+		local part = state.anchorInfo.part
+		local wasAnchored = state.anchorInfo.wasAnchored
+		pcall(function()
+			part.Anchored = wasAnchored
+		end)
+	end
+	state.anchorInfo = nil
+	if state.head and state.head:IsA("BasePart") then
+		local head = state.head
+		head.Massless = state.originalMassless or false
+		pcall(function()
+			head.CustomPhysicalProperties = state.originalPhysicalProperties
+		end)
+	end
+	state.head = nil
+	state.originalMassless = nil
+	state.originalPhysicalProperties = nil
+
+	if state.wheelConstraints then
+		for constraint, info in pairs(state.wheelConstraints) do
+			if constraint then
+				pcall(function()
+					constraint.Enabled = info.enabled ~= nil and info.enabled or true
+					constraint.AngularVelocity = 0
+					constraint.MotorMaxTorque = info.motorTorque or 0
+				end)
+			end
+		end
+		state.wheelConstraints = nil
+	end
+
+	if state.model then
+		local primary = state.model.PrimaryPart
+		local function zeroConstraint(basePart)
+			if not basePart then return end
+			local constraint = basePart:FindFirstChildOfClass("CylindricalConstraint")
+			if constraint then
+				constraint.AngularVelocity = 0
+				constraint.MotorMaxTorque = 0
+			end
+		end
+		local wheelBL = state.model:FindFirstChild("Wheel_BL")
+		local wheelBR = state.model:FindFirstChild("Wheel_BR")
+		local wheelFL = state.model:FindFirstChild("Wheel_FL")
+		local wheelFR = state.model:FindFirstChild("Wheel_FR")
+		zeroConstraint(wheelBL)
+		zeroConstraint(wheelBR)
+		zeroConstraint(wheelFL)
+		zeroConstraint(wheelFR)
+	end
+
+	if state.walkSuppressed and state.humanoid then
+		local humanoid = state.humanoid
+		pcall(function()
+			humanoid.WalkSpeed = state.originalWalkSpeed or 16
+			humanoid.AutoRotate = (state.originalAutoRotate == nil) and true or state.originalAutoRotate
+		end)
+	end
+	state.walkSuppressed = nil
+	state.humanoid = nil
+	state.originalWalkSpeed = nil
+	state.originalAutoRotate = nil
+end
+
 hydraulicRemote.OnServerEvent:Connect(function(player)
-	-- Debounce - ป้องกันการคลิกเร็วเกินไป
-	local currentTime = tick()
-	if hydraulicDebounce[player] and (currentTime - hydraulicDebounce[player]) < 0.5 then
-		print("Hydraulic arm debounced for", player.Name)
+	local now = tick()
+	if drillDebounce[player] and (now - drillDebounce[player]) < 0.15 then
 		return
 	end
-	hydraulicDebounce[player] = currentTime
+	drillDebounce[player] = now
 
-	local pc = findPlayerHydraulicArm(player)
-	if not pc then
-		print("No hydraulic arm found for", player.Name)
+	local hinge, rescueModel = findPlayerDrillHinge(player)
+	if not hinge then
+		warn("Drill arm not found for", player.Name)
 		return
 	end
 
-	pc.LowerLimit = -1
-	pc.UpperLimit = 5
-
-	-- สลับสถานะ - เริ่มต้นเป็นหุบ (up = true)
-	if not playerHydraulicArms[player] then
-		playerHydraulicArms[player] = {up = true} -- เริ่มต้นเป็นหุบ
-	end
-
-	playerHydraulicArms[player].up = not playerHydraulicArms[player].up
-	local up = playerHydraulicArms[player].up
-
-	-- กดครั้งแรก = หุบ (0), กดครั้งสอง = เลื่อนออก (-1)
-	if up then
-		-- หุบ - เลื่อนเข้าสุด
-		pc.Speed = 100
-		pc.TargetPosition = 0
-		print(player.Name .. " hydraulic arm: RETRACTING to position 0")
+	local state = playerDrillStates[player]
+	if not state then
+		state = { combo = 0, lastTime = 0, token = 0, hinge = hinge, model = rescueModel }
+		playerDrillStates[player] = state
 	else
-		-- เลื่อนออก
-		pc.Speed = 100
-		pc.TargetPosition = -10
-		print(player.Name .. " hydraulic arm: EXTENDING to position -1")
+		state.hinge = hinge
+		state.model = rescueModel
 	end
 
-	print(player.Name .. " activated hydraulic arm - Position:", pc.TargetPosition, "Speed:", pc.Speed)
+	if now - state.lastTime <= COMBO_TIMEOUT then
+		state.combo = math.min(state.combo + 1, MAX_COMBO)
+	else
+		state.combo = 1
+	end
+	state.lastTime = now
+
+	applyDrillSpin(player, state)
+
+	state.token = (state.token or 0) + 1
+	local token = state.token
+	task.delay(COMBO_TIMEOUT, function()
+		if state.token ~= token then
+			return
+		end
+		state.combo = 0
+		state.isActive = false
+		stopDrillSpin(state)
+	end)
 end)
 
 -- Spawn Original Rescue Model
@@ -424,9 +624,13 @@ Players.PlayerRemoving:Connect(function(player)
 		originalRescueConnections[originalConnectionKey] = nil
 	end
 
-	-- ลบข้อมูล hydraulic arm และ debounce
-	playerHydraulicArms[player] = nil
-	hydraulicDebounce[player] = nil
+	local drillState = playerDrillStates[player]
+	if drillState then
+		drillState.isActive = false
+		stopDrillSpin(drillState)
+		playerDrillStates[player] = nil
+	end
+	drillDebounce[player] = nil
 end)
 
 print("RescueBotServer loaded")
