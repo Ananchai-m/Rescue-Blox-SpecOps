@@ -6,6 +6,10 @@ local Workspace = game:GetService("Workspace")
 local Debris = game:GetService("Debris")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 
+-- Import shared modules
+local DrillConfig = require(ReplicatedStorage.Modules.DrillConfig)
+local DrillSystem = require(ReplicatedStorage.Modules.DrillSystem)
+
 -- รอ RemoteEvents
 local remoteEvents = ReplicatedStorage:WaitForChild("RescueBotRemotes")
 local spawnCompanionEvent = remoteEvents:WaitForChild("SpawnCompanion")
@@ -15,6 +19,7 @@ local hydraulicRemote = remoteEvents:WaitForChild("ActivateHydraulic")
 local spawnOriginalRescueEvent = remoteEvents:WaitForChild("SpawnOriginalRescue")
 local controlOriginalRescueEvent = remoteEvents:WaitForChild("ControlOriginalRescue")
 local stopOriginalRescueEvent = remoteEvents:WaitForChild("StopOriginalRescue")
+local drillProgressRemote = remoteEvents:WaitForChild("HydraulicDrillProgress")
 
 local player = Players.LocalPlayer
 local character = script.Parent
@@ -68,6 +73,7 @@ local colorCorrection = nil
 local originalFogEnd = nil
 local humanoidHighlights = {}
 local humanoidScanConnection = nil
+
 
 -- ฟังก์ชันให้ companion ตามผู้เล่นเมื่อไม่ได้ควบคุม
 local function startCompanionFollow()
@@ -227,6 +233,12 @@ local function stopHumanoidScanning()
 	print("DEBUG: Removed", highlightCount, "tracked highlights and", orphanCount, "orphan highlights")
 	print("DEBUG: Humanoid scanning stopped - All highlights removed")
 end
+
+-- เชื่อมต่อ DrillSystem กับ server remote
+connections.drillProgress = drillProgressRemote.OnClientEvent:Connect(function(payload)
+	-- ใช้ DrillSystem จัดการ UI แทน (ถ้าต้องการ)
+	-- DrillSystem จัดการ UI เอง แล้ว
+end)
 
 -- Camera tracking functions
 local function applyCameraZoom()
@@ -1392,10 +1404,19 @@ connections.inputBegan = UserInputService.InputBegan:Connect(function(input, gam
 		end
 	end
 
-	-- คลิกที่ไหนบนหน้าจอก็ได้เพื่อเปิดใช้ hydraulic arm
+	-- คลิกที่ไหนบนหน้าจอก็ได้เพื่อเจาะหรือเปิดใช้ hydraulic arm
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		hydraulicRemote:FireServer()
-		print("Screen clicked - Hydraulic arm activated!")
+		-- ได้ตำแหน่งของเมาส์
+		local mouse = player:GetMouse()
+		local clickPosition = mouse.Hit.Position
+
+		-- ลองเจาะก่อน ถ้าไม่มี target ให้เจาะก็เปิด hydraulic arm
+		local didDrill = DrillSystem.handleDrillingClick(clickPosition)
+
+		if not didDrill then
+			hydraulicRemote:FireServer()
+			print("Screen clicked - Hydraulic arm activated!")
+		end
 	end
 
 	-- Manual control inputs (เฉพาะเมื่ออยู่ใน Rescue Mode)
@@ -1464,6 +1485,7 @@ player.CharacterAdded:Connect(function(newCharacter)
 end)
 
 -- เรียกใช้เมื่อเริ่มต้น - เริ่มควบคุมทันที
+DrillSystem.clearOldDrillingData() -- ล้างข้อมูลการเจาะเก่า
 wait(1) -- รอให้ character โหลดเสร็จ
 spawnRescueCompanion() -- Spawn companion และเริ่มควบคุมทันที
 setupSimuTouched() -- Setup Simu touch event

@@ -2,6 +2,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
+-- Import shared config
+local DrillConfig = require(ReplicatedStorage.Modules.DrillConfig)
+
 -- สร้าง RemoteEvents สำหรับสื่อสารกับ client
 local remoteEventsFolder = ReplicatedStorage:FindFirstChild("RescueBotRemotes")
 if not remoteEventsFolder then
@@ -32,6 +35,7 @@ local hydraulicRemote = getOrCreateRemote("ActivateHydraulic")
 local spawnOriginalRescueEvent = getOrCreateRemote("SpawnOriginalRescue")
 local controlOriginalRescueEvent = getOrCreateRemote("ControlOriginalRescue")
 local stopOriginalRescueEvent = getOrCreateRemote("StopOriginalRescue")
+local drillProgressRemote = getOrCreateRemote("HydraulicDrillProgress")
 local CompanionFollower = require(script.Parent:WaitForChild("CompanionFollower"))
 
 -- เก็บข้อมูลรถของแต่ละผู้เล่น
@@ -39,6 +43,7 @@ local playerVehicles = {}
 local vehicleConnections = {}
 local playerDrillStates = {}
 local playerOriginalRescue = {}
+local playerDrillTargets = {}
 local originalRescueConnections = {}
 local drillDebounce = {} -- ป้องกันการคลิกเร็วเกินไป
 
@@ -288,6 +293,136 @@ local BASE_TORQUE = 12000
 local TORQUE_STEP = 18000
 local COMBO_TIMEOUT = 1.5
 
+local function findMotorInside(part)
+	if not part then
+		return nil
+	end
+
+	local motor = part:FindFirstChildWhichIsA("Motor6D")
+	if motor then
+		return motor
+	end
+
+	for _, descendant in ipairs(part:GetDescendants()) do
+		if descendant:IsA("Motor6D") then
+			return descendant
+		end
+	end
+
+	return nil
+end
+
+local function locateDrillTarget(state)
+	if not state then
+		return nil
+	end
+
+	local hinge = state.hinge
+	local head = hinge and hinge.Parent
+	if not (head and head:IsA("BasePart")) then
+		return nil
+	end
+
+	local nearbyParts = workspace:GetPartBoundsInRadius(head.Position, DrillConfig.TARGET_RADIUS)
+	local best
+	local bestDistance = math.huge
+	for _, candidate in ipairs(nearbyParts) do
+		local isOwn = state.model and state.model:IsAncestorOf(candidate)
+		if candidate ~= head and not isOwn and candidate:IsA("BasePart") then
+			local motor = findMotorInside(candidate)
+			if motor then
+				local distance = (candidate.Position - head.Position).Magnitude
+				if distance < bestDistance then
+					bestDistance = distance
+					best = {
+						part = candidate,
+						motor = motor,
+					}
+				end
+			end
+		end
+	end
+
+	return best
+end
+
+local function resetDrillTarget(player)
+	local targetInfo = playerDrillTargets[player]
+	if not targetInfo then
+		return
+	end
+	playerDrillTargets[player] = nil
+	pcall(function()
+		drillProgressRemote:FireClient(player, {
+			status = "cancel",
+		})
+	end)
+end
+
+local function updateDrillProgress(player, state)
+	local detected = locateDrillTarget(state)
+	if not detected then
+		resetDrillTarget(player)
+		return
+	end
+
+	local current = playerDrillTargets[player]
+	if not current or current.part ~= detected.part then
+		current = {
+			part = detected.part,
+			motor = detected.motor,
+			clicks = 0,
+			required = DrillConfig.CLICKS_REQUIRED,
+		}
+		playerDrillTargets[player] = current
+		drillProgressRemote:FireClient(player, {
+			status = "start",
+			partName = current.part.Name,
+			progress = 0,
+			requiredClicks = current.required,
+			clicks = 0,
+		})
+	else
+		current.motor = current.motor or detected.motor
+	end
+
+	current.clicks += 1
+	local progress = math.clamp(current.clicks / current.required, 0, 1)
+
+	if progress >= 1 then
+		local motor = current.motor
+		if motor and motor.Parent then
+			pcall(function()
+				motor:Destroy()
+			end)
+		else
+			-- หากหา motor ไม่เจอแล้ว ให้ลองค้นหาอีกครั้งก่อนจบ
+			local freshMotor = findMotorInside(current.part)
+			if freshMotor then
+				pcall(function()
+					freshMotor:Destroy()
+				end)
+			end
+		end
+		drillProgressRemote:FireClient(player, {
+			status = "complete",
+			partName = current.part.Name,
+			progress = 1,
+			requiredClicks = current.required,
+			clicks = current.required,
+		})
+		playerDrillTargets[player] = nil
+	else
+		drillProgressRemote:FireClient(player, {
+			status = "inprogress",
+			partName = current.part.Name,
+			progress = progress,
+			requiredClicks = current.required,
+			clicks = current.clicks,
+		})
+	end
+end
+
 local function applyDrillSpin(player, state)
 	local hinge = state.hinge
 	if not hinge then
@@ -507,6 +642,8 @@ hydraulicRemote.OnServerEvent:Connect(function(player)
 
 	state.token = (state.token or 0) + 1
 	local token = state.token
+
+	updateDrillProgress(player, state)
 	task.delay(COMBO_TIMEOUT, function()
 		if state.token ~= token then
 			return
@@ -514,6 +651,7 @@ hydraulicRemote.OnServerEvent:Connect(function(player)
 		state.combo = 0
 		state.isActive = false
 		stopDrillSpin(state)
+		resetDrillTarget(player)
 	end)
 end)
 
@@ -617,6 +755,8 @@ Players.PlayerRemoving:Connect(function(player)
 		vehicleConnections[connectionKey]:Disconnect()
 		vehicleConnections[connectionKey] = nil
 	end
+
+	playerDrillTargets[player] = nil
 
 	local originalConnectionKey = "original_" .. tostring(player.UserId)
 	if originalRescueConnections[originalConnectionKey] then
