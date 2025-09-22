@@ -155,22 +155,33 @@ local function findDrillablePartsNearPosition(position, range)
 	local foundParts = {}
 	local drillArmParts = {} -- เก็บ part ที่อยู่ใน DrillArm แยกต่างหาก
 
-	-- รายชื่อ Model ที่ต้องข้าม (ของตัวเอง)
+	-- รายชื่อ Model ที่ต้องข้าม
 	local ignoredModels = {}
 
-	-- เพิ่ม character ของผู้เล่น
-	if character then
-		ignoredModels[character] = true
+	-- เพิ่ม character ของผู้เล่นทุกคน
+	for _, otherPlayer in pairs(Players:GetPlayers()) do
+		if otherPlayer.Character then
+			ignoredModels[otherPlayer.Character] = true
+		end
 	end
 
-	-- เพิ่ม Rescue models ของผู้เล่น
-	local rescueCompanion = workspace:FindFirstChild(player.Name .. "_RescueCompanion")
-	local rescueModel = workspace:FindFirstChild(player.Name .. "_Rescue")
-	if rescueCompanion then
-		ignoredModels[rescueCompanion] = true
+	-- เพิ่ม Rescue models ของผู้เล่นทุกคน
+	for _, otherPlayer in pairs(Players:GetPlayers()) do
+		local rescueCompanion = workspace:FindFirstChild(otherPlayer.Name .. "_RescueCompanion")
+		local rescueModel = workspace:FindFirstChild(otherPlayer.Name .. "_Rescue")
+		if rescueCompanion then
+			ignoredModels[rescueCompanion] = true
+		end
+		if rescueModel then
+			ignoredModels[rescueModel] = true
+		end
 	end
-	if rescueModel then
-		ignoredModels[rescueModel] = true
+
+	-- เพิ่ม Victims ทั้งหมด
+	for _, obj in pairs(workspace:GetChildren()) do
+		if obj:IsA("Model") and string.find(obj.Name, "Victim_") then
+			ignoredModels[obj] = true
+		end
 	end
 
 	for _, obj in pairs(workspace:GetDescendants()) do
