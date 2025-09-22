@@ -10,6 +10,7 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local DrillConfig = require(ReplicatedStorage.Modules.DrillConfig)
 local DrillSystem = require(ReplicatedStorage.Modules.DrillSystem)
 local WaitingSystem = require(ReplicatedStorage.Modules.WaitingSystem)
+local MapSelectionSystem = require(ReplicatedStorage.Modules.MapSelectionSystem)
 
 -- รอ RemoteEvents
 local remoteEvents = ReplicatedStorage:WaitForChild("RescueBotRemotes")
@@ -21,6 +22,8 @@ local spawnOriginalRescueEvent = remoteEvents:WaitForChild("SpawnOriginalRescue"
 local controlOriginalRescueEvent = remoteEvents:WaitForChild("ControlOriginalRescue")
 local stopOriginalRescueEvent = remoteEvents:WaitForChild("StopOriginalRescue")
 local drillProgressRemote = remoteEvents:WaitForChild("HydraulicDrillProgress")
+local waitingSystemRemote = remoteEvents:WaitForChild("WaitingSystem")
+local mapVotingRemote = remoteEvents:WaitForChild("MapVoting")
 
 local player = Players.LocalPlayer
 local character = script.Parent
@@ -54,6 +57,14 @@ local WHEEL_SMOOTH_SPEED = 10
 
 -- Flip system variables
 local flipSurfaceGui = nil
+
+-- Game timer variables
+local gameTimerGui = nil
+local timerConnection = nil
+
+-- Client-side waiting system variables
+local currentWaitingCount = 0
+local maxPlayersCount = 2
 
 -- ระบบ Rescue Mode แบบเดิม (สำหรับ Simu touch)
 local originalRescueModel = nil
@@ -811,6 +822,97 @@ local function updateFlipGui()
 	end
 end
 
+-- สร้าง Game Timer GUI สำหรับนับถอยหลัง 5 นาที
+local function createGameTimerGui()
+	-- ลบ GUI เก่าถ้ามี
+	if gameTimerGui then
+		gameTimerGui:Destroy()
+		gameTimerGui = nil
+	end
+
+	-- หยุด timer connection เก่าถ้ามี
+	if timerConnection then
+		timerConnection:Disconnect()
+		timerConnection = nil
+	end
+
+	-- สร้าง ScreenGui
+	gameTimerGui = Instance.new("ScreenGui")
+	gameTimerGui.Name = "GameTimerGui"
+	gameTimerGui.ResetOnSpawn = false
+	gameTimerGui.IgnoreGuiInset = true
+	gameTimerGui.Parent = player.PlayerGui
+
+	-- สร้าง Frame หลัก
+	local mainFrame = Instance.new("Frame")
+	mainFrame.Name = "TimerFrame"
+	mainFrame.Size = UDim2.new(0.2, 0, 0.08, 0)
+	mainFrame.Position = UDim2.new(0.4, 0, 0.05, 0) -- อยู่ตรงกลางด้านบน
+	mainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	mainFrame.BackgroundTransparency = 0.3
+	mainFrame.BorderSizePixel = 0
+	mainFrame.Parent = gameTimerGui
+
+	-- สร้าง UICorner สำหรับ Frame
+	local frameCorner = Instance.new("UICorner")
+	frameCorner.CornerRadius = UDim.new(0, 8)
+	frameCorner.Parent = mainFrame
+
+	-- สร้าง TextLabel สำหรับแสดงเวลา
+	local timerLabel = Instance.new("TextLabel")
+	timerLabel.Name = "TimerLabel"
+	timerLabel.Size = UDim2.new(1, 0, 1, 0)
+	timerLabel.Position = UDim2.new(0, 0, 0, 0)
+	timerLabel.BackgroundTransparency = 1
+	timerLabel.Text = "05:00"
+	timerLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	timerLabel.TextScaled = true
+	timerLabel.Font = Enum.Font.GothamBold
+	timerLabel.Parent = mainFrame
+
+	-- เริ่มนับถอยหลังจาก 5 นาที (300 วินาที)
+	local timeLeft = 300
+
+	-- ฟังก์ชันอัปเดตเวลา
+	local function updateTimer()
+		local minutes = math.floor(timeLeft / 60)
+		local seconds = timeLeft % 60
+		timerLabel.Text = string.format("%02d:%02d", minutes, seconds)
+
+		-- เปลี่ยนสีเมื่อเวลาเหลือน้อย
+		if timeLeft <= 60 then
+			timerLabel.TextColor3 = Color3.fromRGB(255, 100, 100) -- แดง
+		elseif timeLeft <= 120 then
+			timerLabel.TextColor3 = Color3.fromRGB(255, 255, 100) -- เหลือง
+		else
+			timerLabel.TextColor3 = Color3.fromRGB(255, 255, 255) -- ขาว
+		end
+
+		timeLeft = timeLeft - 1
+
+		-- เมื่อหมดเวลา
+		if timeLeft < 0 then
+			timerLabel.Text = "00:00"
+			timerLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
+			if timerConnection then
+				timerConnection:Disconnect()
+				timerConnection = nil
+			end
+			print("Game timer finished!")
+		end
+	end
+
+	-- เริ่ม timer
+	timerConnection = task.spawn(function()
+		while timeLeft >= 0 and gameTimerGui and gameTimerGui.Parent do
+			updateTimer()
+			task.wait(1)
+		end
+	end)
+
+	print("Game Timer GUI created - 5 minute countdown started")
+end
+
 -- ส่งข้อมูลการควบคุมไปยัง server (สำหรับ companion)
 local function updateManualControls()
 	if not isRescueMode then return end
@@ -1226,39 +1328,11 @@ local function setupSimuTouched()
 			local humanoidHit = hit.Parent:FindFirstChildOfClass("Humanoid")
 			if humanoidHit and hit.Parent == character then
 				simuDebounce = true
-				print("Touched Simu - Adding player to waiting list")
+				print("Touched Simu - Requesting to join waiting list")
+				print("DEBUG: Player", player.Name, "touching Simu. playerInGame =", playerInGame)
 
-				-- เพิ่มผู้เล่นเข้าคิวรอ
-				local gameReady = WaitingSystem.addWaitingPlayer(player)
-
-				if gameReady then
-					-- ครบจำนวนแล้ว เริ่มนับถอยหลัง แล้วเริ่ม Map Selection แล้วเริ่มเกม
-					print("Game ready - Starting countdown then Map Selection then original Rescue Mode")
-
-					-- ตั้งสถานะว่าผู้เล่นคนนี้เข้าเกมแล้ว
-					playerInGame = true
-					print("Player entered game - Simu disabled for this player")
-
-					-- รอให้ countdown + Map Selection เสร็จ แล้วจึง freeze และเริ่มเกม
-					spawn(function()
-						wait(23) -- รอให้ countdown 5s + Map Selection 15s + result 3s = 23s
-
-						-- Freeze ผู้เล่นหลังจาก Map Selection เสร็จ
-						if character and character:FindFirstChild("Humanoid") then
-							character.Humanoid.PlatformStand = true
-							if character.PrimaryPart then
-								character.PrimaryPart.Anchored = true
-							end
-							print("Player frozen after Map Selection - preparing to spawn rescue vehicle")
-						end
-
-						wait(2) -- buffer เพิ่มอีกนิด
-						startOriginalRescueMode() -- บังคับ Rescue Model แบบเดิม
-					end)
-				else
-					-- ยังไม่ครบ แสดงข้อความรอ
-					print("Waiting for more players...")
-				end
+				-- ส่งคำขอไป server
+				waitingSystemRemote:FireServer("addPlayer")
 
 				-- Reset debounce หลัง 2 วินาที (ใช้ spawn เพื่อไม่ block)
 				spawn(function()
@@ -1372,6 +1446,9 @@ function startOriginalRescueMode()
 		-- สร้าง flip GUI สำหรับ original rescue
 		createFlipGui(originalRescueModel)
 
+		-- สร้าง Timer GUI
+		createGameTimerGui()
+
 		connections.originalRescueControl = RunService.Heartbeat:Connect(function()
 			updateOriginalRescueControls() -- ส่ง input ไป server
 			-- อัปเดต flip GUI
@@ -1484,8 +1561,8 @@ connections.inputBegan = UserInputService.InputBegan:Connect(function(input, gam
 		end
 	end
 
-	-- คลิกที่ไหนบนหน้าจอก็ได้เพื่อเจาะหรือเปิดใช้ hydraulic arm
-	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+	-- คลิกที่ไหนบนหน้าจอก็ได้เพื่อเจาะหรือเปิดใช้ hydraulic arm (เฉพาะใน rescue mode)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 and (isRescueMode or originalRescueModel) then
 		-- ได้ตำแหน่งของเมาส์
 		local mouse = player:GetMouse()
 		local clickPosition = mouse.Hit.Position
@@ -1570,5 +1647,101 @@ wait(1) -- รอให้ character โหลดเสร็จ
 spawnRescueCompanion() -- Spawn companion และเริ่มควบคุมทันที
 setupSimuTouched() -- Setup Simu touch event
 
-print("RescueBotController loaded - Companion auto-spawned and ready to control with WASD, Press SPACEBAR to flip when stuck/flipped, Press F to stop, Click anywhere to activate hydraulic arm")
+-- Handle WaitingSystem RemoteEvent responses
+waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
+	if action == "gameReady" then
+		local gameReady = ...
+		if gameReady then
+			-- ครบจำนวนแล้ว เริ่มนับถอยหลัง แล้วเริ่ม Map Selection แล้วเริ่มเกม
+			print("Game ready - Starting countdown then Map Selection then original Rescue Mode")
+
+			-- ตั้งสถานะว่าผู้เล่นคนนี้เข้าเกมแล้ว
+			playerInGame = true
+			print("Player entered game - Simu disabled for this player")
+		else
+			print("Added to waiting list - waiting for more players...")
+		end
+	elseif action == "updateCount" then
+		local waitingCount, maxPlayers = ...
+		currentWaitingCount = waitingCount
+		maxPlayersCount = maxPlayers
+
+		-- อัปเดต billboard หรือ UI (ใช้ WaitingSystem ตรงๆ)
+		spawn(function()
+			pcall(function()
+				-- ใช้ module WaitingSystem ที่มีอยู่
+				local simu = workspace:FindFirstChild("Simu")
+				if simu and simu:FindFirstChild("Attachment") then
+					local billboardGui = simu.Attachment:FindFirstChild("BillboardGui")
+					if billboardGui and billboardGui:FindFirstChild("Frame") then
+						local textLabel = billboardGui.Frame:FindFirstChild("TextLabel")
+						if textLabel then
+							local remaining = maxPlayers - waitingCount
+							if waitingCount > 0 and remaining > 0 then
+								textLabel.Text = string.format("Waiting for other players %d/%d คน", remaining, maxPlayers)
+								textLabel.Visible = true
+							elseif waitingCount == 0 then
+								textLabel.Text = "Please join the mission!"
+								textLabel.Visible = true
+							end
+						end
+					end
+				end
+			end)
+		end)
+
+		print("Waiting count updated:", waitingCount, "/", maxPlayers)
+	elseif action == "startGame" then
+		local playersArray = ...
+		print("Server started game with players:", table.concat(playersArray, ", "))
+
+		-- เริ่ม Map Selection แล้วเริ่มเกม
+		spawn(function()
+			-- เริ่มนับถอยหลัง
+			local simu = workspace:FindFirstChild("Simu")
+			if simu and simu:FindFirstChild("Attachment") then
+				local billboardGui = simu.Attachment:FindFirstChild("BillboardGui")
+				if billboardGui and billboardGui:FindFirstChild("Frame") then
+					local textLabel = billboardGui.Frame:FindFirstChild("TextLabel")
+					if textLabel then
+						for countdown = 5, 1, -1 do
+							textLabel.Text = "The mission will start in " .. countdown .. " seconds!"
+							textLabel.Visible = true
+							wait(1)
+						end
+						textLabel.Text = ""
+						textLabel.Visible = false
+					end
+				end
+			end
+
+			print("Starting map selection...")
+			-- เริ่ม Map Selection สำหรับ player คนนี้เท่านั้น (client-side)
+			-- ส่งเฉพาะ local player เพราะแต่ละ client ทำ map selection แยกกัน
+			MapSelectionSystem.startVoting({player})
+
+			-- รอให้ countdown + Map Selection เสร็จ แล้วจึง freeze และเริ่มเกม
+			wait(19) -- รอให้ Map Selection 15s + result 3s + buffer = 19s
+
+			-- Freeze ผู้เล่นหลังจาก Map Selection เสร็จ
+			if character and character:FindFirstChild("Humanoid") then
+				character.Humanoid.PlatformStand = true
+				if character.PrimaryPart then
+					character.PrimaryPart.Anchored = true
+				end
+				print("Player frozen after Map Selection - preparing to spawn rescue vehicle")
+			end
+
+			wait(2) -- buffer เพิ่มอีกนิด
+			startOriginalRescueMode() -- บังคับ Rescue Model แบบเดิม
+		end)
+	elseif action == "gameEnded" then
+		print("Game ended - can join new game")
+		-- รีเซ็ตสถานะ
+		playerInGame = false
+	end
+end)
+
+print("RescueBotController loaded - Companion auto-spawned and ready to control with WASD, Press SPACEBAR to flip when stuck/flipped, Press F to stop")
 print("Camera controls: Z = Toggle Camera Tracking, X = Toggle Thermal Vision")
+print("Drill System: Click anywhere during rescue mode to drill or activate hydraulic arm")

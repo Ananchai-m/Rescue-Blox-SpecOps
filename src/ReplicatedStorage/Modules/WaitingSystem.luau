@@ -6,7 +6,7 @@ local WaitingSystem = {}
 
 -- ตัวแปรสำหรับติดตาม
 local waitingPlayers = {}
-local maxPlayers = 1
+local maxPlayers = 2
 local simuBillboard = nil
 local isCountingDown = false
 local isGamePlaying = false

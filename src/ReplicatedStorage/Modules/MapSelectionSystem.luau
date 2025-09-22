@@ -4,6 +4,10 @@ local TweenService = game:GetService("TweenService")
 
 local MapSelectionSystem = {}
 
+-- รอ RemoteEvents
+local remoteEvents = ReplicatedStorage:WaitForChild("RescueBotRemotes")
+local mapVotingRemote = remoteEvents:WaitForChild("MapVoting")
+
 -- ตัวแปรสำหรับระบบ
 local isVoting = false
 local votingTimer = 15
@@ -15,12 +19,12 @@ local mapSelectionGui = nil
 local maps = {
 	{
 		name = "City Rescue",
-		image = "rbxassetid://0", -- ใส่ Asset ID ของรูป Map
+		image = "rbxasset://textures/ui/GuiImagePlaceholder.png", -- ใส่ Asset ID ของรูป Map
 		description = "Urban rescue mission in the city"
 	},
 	{
 		name = "Mountain Rescue",
-		image = "rbxassetid://0", -- ใส่ Asset ID ของรูป Map
+		image = "rbxasset://textures/ui/GuiImagePlaceholder.png", -- ใส่ Asset ID ของรูป Map
 		description = "Challenging mountain terrain rescue"
 	}
 }
@@ -39,7 +43,7 @@ local function createMapSelectionUI()
 	mainFrame.Size = UDim2.new(1, 0, 1, 0)
 	mainFrame.Position = UDim2.new(0, 0, 0, 0)
 	mainFrame.BackgroundColor3 = Color3.new(0.05, 0.05, 0.15)
-	mainFrame.BackgroundTransparency = 0.5
+	mainFrame.BackgroundTransparency = 1
 	mainFrame.BorderSizePixel = 0
 	mainFrame.Parent = mapSelectionGui
 
@@ -122,7 +126,7 @@ local function createMapSelectionUI()
 		mapImage.Image = map.image
 		mapImage.ScaleType = Enum.ScaleType.Crop
 		mapImage.Parent = mapFrame
-
+		
 		-- Corner สำหรับ Image
 		local imageCorner = Instance.new("UICorner")
 		imageCorner.CornerRadius = UDim.new(0, 8)
@@ -178,7 +182,16 @@ end
 
 -- ฟังก์ชันอัปเดตการแสดงผลสำหรับผู้เล่นคนหนึ่ง
 local function updatePlayerVoteDisplay(player)
-	if not player or not player.PlayerGui then return end
+	if not player then return end
+
+	-- ตรวจสอบว่าเป็น local player หรือไม่ (เพื่อป้องกัน PlayerGui access error)
+	local localPlayer = Players.LocalPlayer
+	if player ~= localPlayer then
+		-- ไม่สามารถเข้าถึง PlayerGui ของผู้เล่นอื่นได้ใน client script
+		return
+	end
+
+	if not player.PlayerGui then return end
 
 	local playerGui = player.PlayerGui:FindFirstChild("MapSelectionGui")
 	if not playerGui then return end
@@ -197,20 +210,34 @@ local function updatePlayerVoteDisplay(player)
 		if stroke then
 			local voteCount = mapFrame:FindFirstChild("VoteCount")
 			if voteCount then
-				local votes = currentVotes[i] or 0
+				-- หา votes จาก mapName แทน index
+				local mapData = maps[i]
+				local votes = 0
+				if mapData then
+					votes = currentVotes[mapData.name] or 0
+				end
 				voteCount.Text = "Votes: " .. votes
 
-				-- เปลี่ยนสีและเอฟเฟกต์ตามสถานะ
-				if playerVotedMap == i then
-					-- ผู้เล่นคนนี้โหวดให้ map นี้
-					voteCount.TextColor3 = Color3.new(1, 1, 0) -- เหลืองสำหรับที่เลือก
-					stroke.Thickness = 5  
-				elseif votes > 0 then
-					-- มีคนโหวดแต่ไม่ใช่ผู้เล่นคนนี้
-					voteCount.TextColor3 = Color3.new(0, 1, 0) -- เขียว
-					stroke.Thickness = 0  
+				-- เปลี่ยนสีและเอฟเฟกต์ตามสถานะ (เฉพาะ local player)
+				local localPlayer = Players.LocalPlayer
+				local localPlayerVotedMap = votingPlayers[localPlayer] or 0
+
+				-- Debug log
+				if i == 1 then -- แสดง debug เฉพาะ map แรก
+					print("DEBUG: localPlayer =", localPlayer and localPlayer.Name)
+					print("DEBUG: localPlayerVotedMap =", localPlayerVotedMap)
+					print("DEBUG: checking map index =", i)
+					print("DEBUG: votingPlayers =", votingPlayers)
+				end
+
+				if localPlayerVotedMap == i then
+					-- Local player โหวดให้ map นี้ - แสดง stroke สีเขียว
+					voteCount.TextColor3 = Color3.fromRGB(40, 127, 71)
+					stroke.Thickness = 5
+					stroke.Color = Color3.fromRGB(40, 127, 71)
 				else
-					-- ไม่มีใครโหวด
+					-- Local player ไม่ได้โหวดให้ map นี้ - ไม่แสดง stroke
+					voteCount.TextColor3 = Color3.new(1, 1, 1) -- ขาวปกติ
 					stroke.Thickness = 0
 				end
 			end
@@ -218,10 +245,12 @@ local function updatePlayerVoteDisplay(player)
 	end
 end
 
--- ฟังก์ชันอัปเดตการแสดงผลให้ทุกผู้เล่น
+-- ฟังก์ชันอัปเดตการแสดงผลให้ทุกผู้เล่น (เฉพาะ local player ใน client)
 local function updateVoteDisplayForAllPlayers()
-	for _, player in pairs(Players:GetPlayers()) do
-		updatePlayerVoteDisplay(player)
+	-- ใน client script จะ update ได้เฉพาะ local player เท่านั้น
+	local localPlayer = Players.LocalPlayer
+	if localPlayer then
+		updatePlayerVoteDisplay(localPlayer)
 	end
 end
 
@@ -247,54 +276,7 @@ local function updateTimer(timeLeft)
 	end
 end
 
--- ฟังก์ชันโหวด
-function MapSelectionSystem.voteForMap(player, mapIndex)
-	if not isVoting then return false end
-	if mapIndex < 1 or mapIndex > #maps then return false end
 
-	-- ลบโหวดเก่าของผู้เล่น
-	for i = 1, #maps do
-		if votingPlayers[player] == i then
-			currentVotes[i] = math.max(0, currentVotes[i] - 1)
-		end
-	end
-
-	-- เพิ่มโหวดใหม่
-	votingPlayers[player] = mapIndex
-	currentVotes[mapIndex] = (currentVotes[mapIndex] or 0) + 1
-
-	print(player.Name .. " voted for " .. maps[mapIndex].name)
-
-	-- อัปเดตการแสดงผลให้ทุกผู้เล่น
-	updateVoteDisplayForAllPlayers()
-	return true
-end
-
--- ฟังก์ชันหาผู้ชนะ
-local function getWinningMap()
-	local maxVotes = 0
-	local winners = {}
-
-	-- หาจำนวนโหวดสูงสุด
-	for i, votes in pairs(currentVotes) do
-		if votes > maxVotes then
-			maxVotes = votes
-			winners = {i}
-		elseif votes == maxVotes and votes > 0 then
-			table.insert(winners, i)
-		end
-	end
-
-	-- ถ้าไม่มีใครโหวดหรือเสมอกัน ให้สุ่ม
-	if #winners == 0 or maxVotes == 0 then
-		return math.random(1, #maps)
-	elseif #winners > 1 then
-		-- เสมอกัน สุ่มเลือก
-		return winners[math.random(1, #winners)]
-	else
-		return winners[1]
-	end
-end
 
 -- ฟังก์ชันสุ่ม spawn points
 local function assignRandomSpawns(players)
@@ -341,10 +323,8 @@ function MapSelectionSystem.startVoting(players)
 	votingPlayers = {}
 	currentVotes = {}
 
-	-- รีเซ็ตโหวด
-	for i = 1, #maps do
-		currentVotes[i] = 0
-	end
+	-- รีเซ็ต votes บน server
+	mapVotingRemote:FireServer("resetVotes")
 
 	print("Starting map voting with " .. #players .. " players")
 
@@ -426,11 +406,37 @@ function MapSelectionSystem.startVoting(players)
 			wait(1)
 		end
 
-		-- หมดเวลา
-		local winningMapIndex = getWinningMap()
-		local winningMap = maps[winningMapIndex]
+		-- หมดเวลา - หา map ที่ได้ votes มากที่สุด
+		local maxVotes = 0
+		local winningMapName = nil
+		local winningMapData = nil
 
-		print("Voting ended! Winning map: " .. winningMap.name)
+		-- หา map ที่มี votes มากที่สุดจาก currentVotes (mapName -> count)
+		for mapName, votes in pairs(currentVotes) do
+			if votes > maxVotes then
+				maxVotes = votes
+				winningMapName = mapName
+			end
+		end
+
+		-- หา mapData จาก mapName
+		if winningMapName then
+			for _, mapData in ipairs(maps) do
+				if mapData.name == winningMapName then
+					winningMapData = mapData
+					break
+				end
+			end
+		end
+
+		-- ถ้าไม่มีใครโหวด ให้เลือกแบบสุ่ม
+		if not winningMapData then
+			local randomIndex = math.random(1, #maps)
+			winningMapData = maps[randomIndex]
+			winningMapName = winningMapData.name
+		end
+
+		print("Voting ended! Winning map: " .. winningMapName)
 
 		-- แสดงผลลัพธ์ในทุก player GUI
 		for _, player in ipairs(players) do
@@ -441,7 +447,7 @@ function MapSelectionSystem.startVoting(players)
 					if mainFrame then
 						local titleLabel = mainFrame:FindFirstChild("TitleLabel")
 						if titleLabel then
-							titleLabel.Text = "SELECTED: " .. winningMap.name
+							titleLabel.Text = "SELECTED: " .. winningMapName
 							titleLabel.TextColor3 = Color3.new(0, 1, 0)
 						end
 					end
@@ -454,8 +460,17 @@ function MapSelectionSystem.startVoting(players)
 		-- มอบหมาย spawn points
 		local spawnAssignments = assignRandomSpawns(players)
 
+		-- หา winning map index สำหรับ backward compatibility
+		local winningMapIndex = 1
+		for i, mapData in ipairs(maps) do
+			if mapData.name == winningMapName then
+				winningMapIndex = i
+				break
+			end
+		end
+
 		-- ส่งผลลัพธ์
-		MapSelectionSystem.onVotingComplete(winningMapIndex, winningMap, spawnAssignments)
+		MapSelectionSystem.onVotingComplete(winningMapIndex, winningMapData, spawnAssignments)
 
 		-- ล้าง UI จากทุก player
 		for _, player in ipairs(players) do
@@ -485,6 +500,30 @@ function MapSelectionSystem.onVotingComplete(mapIndex, mapData, spawnAssignments
 
 	-- ที่นี่สามารถเพิ่มโค้ดสำหรับเริ่มเกมได้
 	-- เช่น teleport ผู้เล่น, เปิด UI เกม, ฯลฯ
+end
+
+-- ฟังก์ชันโหวดสำหรับ Map
+function MapSelectionSystem.voteForMap(player, mapIndex)
+	if not isVoting then
+		print("Voting is not active")
+		return
+	end
+
+	if mapIndex < 1 or mapIndex > #maps then
+		print("Invalid map index:", mapIndex)
+		return
+	end
+
+	local mapData = maps[mapIndex]
+	local mapName = mapData.name
+
+	print(player.Name .. " voted for " .. mapName)
+
+	-- ส่ง vote ไป server
+	mapVotingRemote:FireServer("vote", mapName)
+
+	-- อัปเดต local vote (จะถูก override เมื่อ server ส่งกลับมา)
+	votingPlayers[player] = mapIndex
 end
 
 -- ฟังก์ชันตรวจสอบสถานะ
@@ -526,5 +565,39 @@ end
 function MapSelectionSystem.getMaps()
 	return maps
 end
+
+-- Handle MapVoting RemoteEvent updates from server
+mapVotingRemote.OnClientEvent:Connect(function(action, ...)
+	if action == "updateVotes" then
+		local serverVotes, serverPlayerVotes = ...
+
+		-- อัปเดต currentVotes จาก server
+		currentVotes = {}
+		for mapName, count in pairs(serverVotes) do
+			currentVotes[mapName] = count
+		end
+
+		-- อัปเดต votingPlayers จาก server (playerName -> mapIndex)
+		votingPlayers = {}
+		for playerName, mapName in pairs(serverPlayerVotes) do
+			-- หา player object จาก playerName
+			local player = Players:FindFirstChild(playerName)
+			if player then
+				-- หา mapIndex จาก mapName
+				for i, mapData in ipairs(maps) do
+					if mapData.name == mapName then
+						votingPlayers[player] = i
+						break
+					end
+				end
+			end
+		end
+
+		-- อัปเดต UI
+		updateVoteDisplayForAllPlayers()
+
+		print("Votes updated from server:", currentVotes)
+	end
+end)
 
 return MapSelectionSystem

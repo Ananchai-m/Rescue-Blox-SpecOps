@@ -36,6 +36,8 @@ local spawnOriginalRescueEvent = getOrCreateRemote("SpawnOriginalRescue")
 local controlOriginalRescueEvent = getOrCreateRemote("ControlOriginalRescue")
 local stopOriginalRescueEvent = getOrCreateRemote("StopOriginalRescue")
 local drillProgressRemote = getOrCreateRemote("HydraulicDrillProgress")
+local waitingSystemRemote = getOrCreateRemote("WaitingSystem")
+local mapVotingRemote = getOrCreateRemote("MapVoting")
 local CompanionFollower = require(script.Parent:WaitForChild("CompanionFollower"))
 
 -- เก็บข้อมูลรถของแต่ละผู้เล่น
@@ -46,6 +48,15 @@ local playerOriginalRescue = {}
 local playerDrillTargets = {}
 local originalRescueConnections = {}
 local drillDebounce = {} -- ป้องกันการคลิกเร็วเกินไป
+
+-- Server-side Waiting System variables
+local waitingPlayers = {}
+local maxPlayers = 2
+local isGamePlaying = false
+
+-- Server-side Map Voting variables
+local currentVotes = {} -- {mapName = count}
+local playerVotes = {} -- {player = mapName}
 
 local function sign(x)
 	if x > 0 then return 1 elseif x < 0 then return -1 else return 0 end
@@ -777,6 +788,139 @@ Players.PlayerRemoving:Connect(function(player)
 		playerDrillStates[player] = nil
 	end
 	drillDebounce[player] = nil
+
+	-- ลบผู้เล่นจาก waiting list
+	for i = #waitingPlayers, 1, -1 do
+		if waitingPlayers[i] == player then
+			table.remove(waitingPlayers, i)
+			print("Removed", player.Name, "from waiting list. Total waiting:", #waitingPlayers)
+			-- แจ้ง clients ทั้งหมด
+			waitingSystemRemote:FireAllClients("updateCount", #waitingPlayers, maxPlayers)
+			break
+		end
+	end
+end)
+
+-- Server-side Waiting System functions
+local function startGame()
+	print("Server: Starting game with " .. #waitingPlayers .. " players!")
+	isGamePlaying = true
+
+	-- ส่งรายชื่อผู้เล่นให้ clients
+	local playersArray = {}
+	for _, player in ipairs(waitingPlayers) do
+		table.insert(playersArray, player.Name)
+	end
+
+	-- แจ้ง clients ให้เริ่มเกม
+	waitingSystemRemote:FireAllClients("startGame", playersArray)
+
+	-- ล้างรายการผู้เล่นที่รอ
+	waitingPlayers = {}
+
+	-- รอให้เกมจบ (จำลอง - ในอนาคตอาจมี actual game end logic)
+	spawn(function()
+		wait(300) -- 5 minutes
+		isGamePlaying = false
+		print("Server: Game ended - accepting new players")
+		waitingSystemRemote:FireAllClients("gameEnded")
+	end)
+end
+
+local function addWaitingPlayer(player)
+	-- ตรวจสอบว่าผู้เล่นอยู่ในรายการแล้วหรือไม่
+	for _, waitingPlayer in ipairs(waitingPlayers) do
+		if waitingPlayer == player then
+			return false -- ผู้เล่นอยู่ในรายการแล้ว
+		end
+	end
+
+	-- ตรวจสอบว่าเกมเริ่มแล้วหรือไม่
+	if isGamePlaying then
+		return false -- เกมกำลังเล่นอยู่
+	end
+
+	-- เพิ่มผู้เล่นใหม่
+	table.insert(waitingPlayers, player)
+	print(player.Name .. " added to server waiting list. Total waiting: " .. #waitingPlayers)
+
+	-- แจ้ง clients ทั้งหมด
+	waitingSystemRemote:FireAllClients("updateCount", #waitingPlayers, maxPlayers)
+
+	-- ตรวจสอบว่าครบจำนวนแล้วหรือไม่
+	if #waitingPlayers >= maxPlayers then
+		startGame()
+		return true
+	end
+
+	return false
+end
+
+-- Handle WaitingSystem RemoteEvent
+waitingSystemRemote.OnServerEvent:Connect(function(player, action, ...)
+	if action == "addPlayer" then
+		local gameReady = addWaitingPlayer(player)
+		-- ส่งผลลัพธ์กลับให้ player ที่ request
+		waitingSystemRemote:FireClient(player, "gameReady", gameReady)
+	elseif action == "removePlayer" then
+		for i = #waitingPlayers, 1, -1 do
+			if waitingPlayers[i] == player then
+				table.remove(waitingPlayers, i)
+				print("Removed", player.Name, "from waiting list. Total waiting:", #waitingPlayers)
+				waitingSystemRemote:FireAllClients("updateCount", #waitingPlayers, maxPlayers)
+				break
+			end
+		end
+	end
+end)
+
+-- Handle MapVoting RemoteEvent
+mapVotingRemote.OnServerEvent:Connect(function(player, action, ...)
+	if action == "vote" then
+		local mapName = ...
+		if not mapName then return end
+
+		-- ลบ vote เก่าของผู้เล่น (ถ้ามี)
+		local oldVote = playerVotes[player.Name]
+		if oldVote then
+			currentVotes[oldVote] = (currentVotes[oldVote] or 1) - 1
+			if currentVotes[oldVote] <= 0 then
+				currentVotes[oldVote] = nil
+			end
+		end
+
+		-- เพิ่ม vote ใหม่ (ใช้ player.Name เป็น key)
+		playerVotes[player.Name] = mapName
+		currentVotes[mapName] = (currentVotes[mapName] or 0) + 1
+
+		print("Server: " .. player.Name .. " voted for " .. mapName)
+		print("Current votes:", currentVotes)
+
+		-- ส่งข้อมูล vote ใหม่ให้ clients ทั้งหมด
+		mapVotingRemote:FireAllClients("updateVotes", currentVotes, playerVotes)
+	elseif action == "resetVotes" then
+		-- รีเซ็ต votes (เมื่อเริ่ม voting ใหม่)
+		currentVotes = {}
+		playerVotes = {}
+		print("Server: Reset all votes")
+		mapVotingRemote:FireAllClients("updateVotes", currentVotes, playerVotes)
+	end
+end)
+
+-- Player cleanup for voting
+Players.PlayerRemoving:Connect(function(player)
+	-- ลบ vote ของผู้เล่นที่ออกจากเกม (ใช้ player.Name)
+	local playerVote = playerVotes[player.Name]
+	if playerVote then
+		currentVotes[playerVote] = (currentVotes[playerVote] or 1) - 1
+		if currentVotes[playerVote] <= 0 then
+			currentVotes[playerVote] = nil
+		end
+		playerVotes[player.Name] = nil
+
+		-- แจ้ง clients ที่เหลือ
+		mapVotingRemote:FireAllClients("updateVotes", currentVotes, playerVotes)
+	end
 end)
 
 print("RescueBotServer loaded")
