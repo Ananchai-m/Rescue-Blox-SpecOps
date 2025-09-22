@@ -54,7 +54,15 @@ local function spawnVictimAtPosition(position, spawnPointName)
 
 	-- ตั้งชื่อ victim
 	victim.Name = "Victim_" .. spawnPointName
-	victim.Parent = Workspace
+
+	-- หาหรือสร้าง VictimFolders folder เดียว
+	local victimFolder = workspace:FindFirstChild("VictimFolders")
+	if not victimFolder then
+		victimFolder = Instance.new("Folder")
+		victimFolder.Name = "VictimFolders"
+		victimFolder.Parent = workspace
+	end
+	victim.Parent = victimFolder
 
 	-- คำนวณความสูงของ victim เพื่อวางเท้าให้อยู่บนพื้นผิว
 	local victimHeight = 0
@@ -137,6 +145,8 @@ function VictimSpawner.clearAllVictims()
 	print("Clearing all spawned victims...")
 
 	local clearedCount = 0
+
+	-- ลบ victims จาก tracked array
 	for _, victim in ipairs(spawnedVictims) do
 		if victim and victim.Parent then
 			victim:Destroy()
@@ -144,8 +154,28 @@ function VictimSpawner.clearAllVictims()
 		end
 	end
 
+	-- ลบ VictimFolders folder ทั้งหมด
+	local victimFolder = workspace:FindFirstChild("VictimFolders")
+	if victimFolder then
+		-- นับ victims ที่เหลืออยู่ในfolder (กรณีมี orphan victims)
+		local folderVictimCount = 0
+		for _, child in ipairs(victimFolder:GetChildren()) do
+			if child.Name:match("^Victim_") then
+				folderVictimCount = folderVictimCount + 1
+			end
+		end
+
+		if folderVictimCount > 0 then
+			print("Found", folderVictimCount, "additional victims in folder")
+			clearedCount = clearedCount + folderVictimCount
+		end
+
+		victimFolder:Destroy()
+		print("VictimFolders folder removed")
+	end
+
 	spawnedVictims = {}
-	print("Cleared", clearedCount, "victims")
+	print("Cleared", clearedCount, "victims total")
 end
 
 -- ฟังก์ชันดูจำนวน victims ที่ spawn แล้ว

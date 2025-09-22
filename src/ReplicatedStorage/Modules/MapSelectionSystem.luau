@@ -271,42 +271,6 @@ end
 
 
 
--- ฟังก์ชันสุ่ม spawn points
-local function assignRandomSpawns(players)
-	local spawnRescues = workspace:FindFirstChild("SpawnRescues")
-	if not spawnRescues then
-		warn("SpawnRescues not found in workspace")
-		return {}
-	end
-
-	-- หา spawn points ทั้งหมด
-	local spawnPoints = {}
-	for _, child in ipairs(spawnRescues:GetChildren()) do
-		if child:IsA("BasePart") then
-			table.insert(spawnPoints, child)
-		end
-	end
-
-	if #spawnPoints == 0 then
-		warn("No spawn points found in SpawnRescues")
-		return {}
-	end
-
-	-- สุ่มมอบหมาย spawn points ให้ผู้เล่น
-	local assignments = {}
-	for i, player in ipairs(players) do
-		if i <= #spawnPoints then
-			local randomIndex = math.random(1, #spawnPoints)
-			assignments[player] = spawnPoints[randomIndex]
-			table.remove(spawnPoints, randomIndex) -- ไม่ให้ซ้ำ
-		else
-			-- ถ้าผู้เล่นเยอะกว่า spawn points ให้ใช้แบบสุ่ม
-			assignments[player] = spawnPoints[math.random(1, #spawnPoints)]
-		end
-	end
-
-	return assignments
-end
 
 -- ฟังก์ชันเริ่มการโหวด
 function MapSelectionSystem.startVoting(players)
@@ -450,9 +414,6 @@ function MapSelectionSystem.startVoting(players)
 
 		wait(3) -- แสดงผลลัพธ์ 3 วินาที
 
-		-- มอบหมาย spawn points
-		local spawnAssignments = assignRandomSpawns(players)
-
 		-- หา winning map index สำหรับ backward compatibility
 		local winningMapIndex = 1
 		for i, mapData in ipairs(maps) do
@@ -462,8 +423,8 @@ function MapSelectionSystem.startVoting(players)
 			end
 		end
 
-		-- ส่งผลลัพธ์
-		MapSelectionSystem.onVotingComplete(winningMapIndex, winningMapData, spawnAssignments)
+		-- ส่งผลลัพธ์ (ไม่ต้องส่ง spawn assignments เพราะ server จัดการแล้ว)
+		MapSelectionSystem.onVotingComplete(winningMapIndex, winningMapData)
 
 		-- ล้าง UI จากทุก player
 		for _, player in ipairs(players) do
@@ -482,17 +443,11 @@ function MapSelectionSystem.startVoting(players)
 end
 
 -- ฟังก์ชัน callback สำหรับเมื่อโหวดเสร็จ (ให้ระบบอื่นเรียกใช้)
-function MapSelectionSystem.onVotingComplete(mapIndex, mapData, spawnAssignments)
+function MapSelectionSystem.onVotingComplete(mapIndex, mapData)
 	-- ฟังก์ชันนี้จะถูกเรียกเมื่อการโหวดเสร็จสิ้น
 	print("Map voting completed:")
 	print("- Selected map:", mapData.name)
-	print("- Spawn assignments:")
-	for player, spawnPoint in pairs(spawnAssignments) do
-		print("  " .. player.Name .. " -> " .. spawnPoint.Name)
-	end
-
-	-- ที่นี่สามารถเพิ่มโค้ดสำหรับเริ่มเกมได้
-	-- เช่น teleport ผู้เล่น, เปิด UI เกม, ฯลฯ
+	-- Spawn assignments ถูกจัดการที่ server แล้ว
 end
 
 -- ฟังก์ชันโหวดสำหรับ Map
@@ -558,6 +513,7 @@ end
 function MapSelectionSystem.getMaps()
 	return maps
 end
+
 
 -- Handle MapVoting RemoteEvent updates from server
 mapVotingRemote.OnClientEvent:Connect(function(action, ...)

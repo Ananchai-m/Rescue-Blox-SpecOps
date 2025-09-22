@@ -38,6 +38,7 @@ local stopOriginalRescueEvent = getOrCreateRemote("StopOriginalRescue")
 local drillProgressRemote = getOrCreateRemote("HydraulicDrillProgress")
 local waitingSystemRemote = getOrCreateRemote("WaitingSystem")
 local mapVotingRemote = getOrCreateRemote("MapVoting")
+local spawnAssignmentRemote = getOrCreateRemote("SpawnAssignment")
 local CompanionFollower = require(script.Parent:WaitForChild("CompanionFollower"))
 
 -- Import VictimSpawner
@@ -60,6 +61,7 @@ local isGamePlaying = false
 -- Server-side Map Voting variables
 local currentVotes = {} -- {mapName = count}
 local playerVotes = {} -- {player = mapName}
+local playerSpawnAssignments = {} -- {playerName = spawnPoint} - spawn points ที่ไม่ซ้ำกัน
 
 local function sign(x)
 	if x > 0 then return 1 elseif x < 0 then return -1 else return 0 end
@@ -814,9 +816,52 @@ Players.PlayerRemoving:Connect(function(player)
 end)
 
 -- Server-side Waiting System functions
+-- ฟังก์ชันสุ่ม spawn points ที่ไม่ซ้ำกัน (ย้ายมาจาก client)
+local function assignRandomSpawns(players)
+	local spawnRescues = workspace:FindFirstChild("SpawnRescues")
+	if not spawnRescues then
+		warn("SpawnRescues not found in workspace")
+		return {}
+	end
+
+	-- หา spawn points ทั้งหมด
+	local spawnPoints = {}
+	for _, child in ipairs(spawnRescues:GetChildren()) do
+		if child:IsA("BasePart") then
+			table.insert(spawnPoints, child)
+		end
+	end
+
+	if #spawnPoints == 0 then
+		warn("No spawn points found in SpawnRescues")
+		return {}
+	end
+
+	-- สุ่มมอบหมาย spawn points ให้ผู้เล่น
+	local assignments = {}
+	for i, player in ipairs(players) do
+		if i <= #spawnPoints then
+			local randomIndex = math.random(1, #spawnPoints)
+			assignments[player.Name] = spawnPoints[randomIndex] -- ใช้ player.Name เป็น key
+			table.remove(spawnPoints, randomIndex) -- ไม่ให้ซ้ำ
+			print("Assigned spawn point", assignments[player.Name].Name, "to", player.Name)
+		else
+			-- ถ้าผู้เล่นเยอะกว่า spawn points ให้ใช้แบบสุ่ม
+			local randomPoint = spawnPoints[math.random(1, #spawnPoints)]
+			assignments[player.Name] = randomPoint
+			print("Assigned random spawn point", randomPoint.Name, "to", player.Name, "(overflow)")
+		end
+	end
+
+	return assignments
+end
+
 local function startGame()
 	print("Server: Starting game with " .. #waitingPlayers .. " players!")
 	isGamePlaying = true
+
+	-- สุ่ม spawn points ให้ผู้เล่นแบบไม่ซ้ำกัน
+	playerSpawnAssignments = assignRandomSpawns(waitingPlayers)
 
 	-- ส่งรายชื่อผู้เล่นให้ clients
 	local playersArray = {}
@@ -946,6 +991,22 @@ Players.PlayerRemoving:Connect(function(player)
 
 		-- แจ้ง clients ที่เหลือ
 		mapVotingRemote:FireAllClients("updateVotes", currentVotes, playerVotes)
+	end
+end)
+
+-- Handle SpawnAssignment RemoteEvent
+spawnAssignmentRemote.OnServerEvent:Connect(function(player, action)
+	if action == "getSpawnPoint" then
+		local assignedSpawnPoint = playerSpawnAssignments[player.Name]
+		if assignedSpawnPoint then
+			-- ส่ง spawn point position กลับไป (ไม่ส่ง BasePart object)
+			local position = assignedSpawnPoint.Position
+			spawnAssignmentRemote:FireClient(player, "spawnPoint", position)
+			print("Sent spawn point to", player.Name, ":", position)
+		else
+			spawnAssignmentRemote:FireClient(player, "spawnPoint", nil)
+			print("No spawn point assigned for", player.Name)
+		end
 	end
 end)
 

@@ -12,6 +12,9 @@ local DrillSystem = require(ReplicatedStorage.Modules.DrillSystem)
 local WaitingSystem = require(ReplicatedStorage.Modules.WaitingSystem)
 local MapSelectionSystem = require(ReplicatedStorage.Modules.MapSelectionSystem)
 local GameTimer = require(ReplicatedStorage.Modules.GameTimer)
+local SpawnPointManager = require(ReplicatedStorage.Modules.SpawnPointManager)
+local CameraSystem = require(ReplicatedStorage.Modules.CameraSystem)
+local VehicleController = require(ReplicatedStorage.Modules.VehicleController)
 
 -- รอ RemoteEvents
 local remoteEvents = ReplicatedStorage:WaitForChild("RescueBotRemotes")
@@ -42,19 +45,7 @@ local isRescueMode = false
 local rescueModel = nil
 local connections = {}
 
--- Manual control variables
-local throttleInput = 0
-local steerInput = 0
-local vehicleParts = {}
-local manualVehicle = nil
-
--- Wheel smoothing variables
-local wheelControlState = {}
-local wheelSmoothingConnection = nil
-local MAX_WHEEL_TORQUE = 120000
-local FRONT_TORQUE_FACTOR = 0.7
-local BRAKE_TORQUE = 12000
-local WHEEL_SMOOTH_SPEED = 10
+-- Vehicle control จัดการโดย VehicleController module แล้ว
 
 -- Flip system variables
 local flipSurfaceGui = nil
@@ -64,25 +55,9 @@ local flipSurfaceGui = nil
 local currentWaitingCount = 0
 local maxPlayersCount = 2
 
--- ระบบ Rescue Mode แบบเดิม (สำหรับ Simu touch)
-local originalRescueModel = nil
+-- ระบบ Rescue Mode แบบเดิม (จัดการโดย VehicleController แล้ว)
 
--- Camera zoom system variables
-local isZoomMode = false
-local originalCameraSubject = nil
-local originalCameraType = nil
-local cameraTrackConnection = nil
-local originalFieldOfView = nil
-local cameraZoomLevels = {1, 2, 5}
-local zoomIndex = 1
-
--- Thermal vision variables
-local isThermalMode = false
-local thermalEffect = nil
-local colorCorrection = nil
-local originalFogEnd = nil
-local humanoidHighlights = {}
-local humanoidScanConnection = nil
+-- Camera system จัดการโดย CameraSystem module แล้ว
 
 
 -- ฟังก์ชันให้ companion ตามผู้เล่นเมื่อไม่ได้ควบคุม
@@ -113,21 +88,21 @@ local function startCompanionFollow()
 	end
 
 	local function sendControls(throttle, steer)
-		throttleInput = throttle
-		steerInput = steer
+		VehicleController.setThrottleInput(throttle)
+		VehicleController.setSteerInput(steer)
 		controlEvent:FireServer(throttle, steer)
 	end
 
 	local function stopControls()
-		throttleInput = 0
-		steerInput = 0
+		VehicleController.setThrottleInput(0)
+		VehicleController.setSteerInput(0)
 		stopControlEvent:FireServer()
 	end
 end
 
 local function stopCompanionFollow()
-	throttleInput = 0
-	steerInput = 0
+	VehicleController.setThrottleInput(0)
+	VehicleController.setSteerInput(0)
 	stopControlEvent:FireServer()
 end
 
@@ -141,108 +116,17 @@ local function disconnectAll()
 	end
 	connections = {}
 
-	if wheelSmoothingConnection then
-		wheelSmoothingConnection:Disconnect()
-		wheelSmoothingConnection = nil
-	end
-	wheelControlState = {}
+	-- ล้าง wheel state ใน VehicleController
+	VehicleController.clearWheelState()
 end
+
+-- Vehicle functions ถูกย้ายไป VehicleController module แล้ว
 
 local function sign(x)
 	if x > 0 then return 1 elseif x < 0 then return -1 else return 0 end
 end
 
-local function initializeWheelConstraint(constraint, torqueLimit)
-	if not constraint then return end
-	wheelControlState[constraint] = {
-		currentAV = constraint.AngularVelocity or 0,
-		targetAV = constraint.AngularVelocity or 0,
-		currentTorque = math.clamp(constraint.MotorMaxTorque or 0, 0, torqueLimit or MAX_WHEEL_TORQUE),
-		targetTorque = math.clamp(constraint.MotorMaxTorque or 0, 0, torqueLimit or MAX_WHEEL_TORQUE),
-		torqueLimit = torqueLimit or MAX_WHEEL_TORQUE,
-	}
-end
-
-local function ensureWheelSmoothing()
-	if wheelSmoothingConnection then return end
-	wheelSmoothingConnection = RunService.Heartbeat:Connect(function(dt)
-		local alpha = math.clamp(dt * WHEEL_SMOOTH_SPEED, 0, 1)
-		local hasData = false
-		for constraint, data in pairs(wheelControlState) do
-			if constraint and constraint.Parent then
-				hasData = true
-				data.currentAV = data.currentAV + (data.targetAV - data.currentAV) * alpha
-				data.currentTorque = data.currentTorque + (data.targetTorque - data.currentTorque) * alpha
-				constraint.AngularVelocity = data.currentAV
-				constraint.MotorMaxTorque = math.clamp(data.currentTorque, 0, data.torqueLimit or MAX_WHEEL_TORQUE)
-			else
-				wheelControlState[constraint] = nil
-			end
-		end
-		if not hasData then
-			wheelSmoothingConnection:Disconnect()
-			wheelSmoothingConnection = nil
-		end
-	end)
-end
-
-local function setWheelTargets(constraint, targetAV, targetTorque)
-	if not constraint then return end
-	if not wheelControlState[constraint] then
-		initializeWheelConstraint(constraint)
-	end
-	local info = wheelControlState[constraint]
-	if not info then return end
-	info.targetAV = targetAV
-	local limit = info.torqueLimit or MAX_WHEEL_TORQUE
-	info.targetTorque = math.clamp(targetTorque, 0, limit)
-	ensureWheelSmoothing()
-end
-
--- Humanoid scanning functions (moved up for proper scoping)
-local function stopHumanoidScanning()
-	print("DEBUG: stopHumanoidScanning() called")
-
-	-- หยุด scanning
-	if humanoidScanConnection then
-		print("DEBUG: Disconnecting humanoid scan connection...")
-		humanoidScanConnection:Disconnect()
-		humanoidScanConnection = nil
-		print("DEBUG: Humanoid scan connection stopped and cleared")
-	else
-		print("DEBUG: No humanoid scan connection to stop")
-	end
-
-	-- ล้าง highlights ทั้งหมด
-	local highlightCount = 0
-	print("DEBUG: humanoidHighlights table has", #humanoidHighlights, "entries")
-	for character, highlight in pairs(humanoidHighlights) do
-		print("DEBUG: Found highlight for character:", character.Name)
-		if highlight and highlight.Parent then
-			highlight:Destroy()
-			highlightCount = highlightCount + 1
-			print("DEBUG: Destroyed highlight for:", character.Name)
-		else
-			print("DEBUG: Highlight already destroyed or no parent for:", character.Name)
-		end
-	end
-	humanoidHighlights = {}
-	print("DEBUG: Cleared humanoidHighlights table")
-
-	-- เพิ่มการลบ highlight ที่อาจค้างอยู่ในระบบ
-	local orphanCount = 0
-	print("DEBUG: Scanning workspace for orphan highlights...")
-	for _, obj in pairs(workspace:GetDescendants()) do
-		if obj:IsA("Highlight") and obj.FillColor == Color3.new(1, 0.5, 0) then
-			print("DEBUG: Found orphan highlight, destroying:", obj.Name, "in", obj.Parent.Name)
-			obj:Destroy()
-			orphanCount = orphanCount + 1
-		end
-	end
-
-	print("DEBUG: Removed", highlightCount, "tracked highlights and", orphanCount, "orphan highlights")
-	print("DEBUG: Humanoid scanning stopped - All highlights removed")
-end
+-- Camera functions ถูกย้ายไป CameraSystem module แล้ว
 
 -- เชื่อมต่อ DrillSystem กับ server remote
 connections.drillProgress = drillProgressRemote.OnClientEvent:Connect(function(payload)
@@ -250,535 +134,8 @@ connections.drillProgress = drillProgressRemote.OnClientEvent:Connect(function(p
 	-- DrillSystem จัดการ UI เอง แล้ว
 end)
 
--- Camera tracking functions
-local function applyCameraZoom()
-	if not isZoomMode or not originalFieldOfView then return end
-	local zoomFactor = cameraZoomLevels[zoomIndex] or 1
-	if zoomFactor <= 0 then
-		zoomFactor = 1
-	end
-	camera.FieldOfView = originalFieldOfView / zoomFactor
-	print(string.format("Camera zoom set to %.1fx", zoomFactor))
-end
 
-local function setCameraZoomIndex(newIndex)
-	local clamped = math.clamp(newIndex, 1, #cameraZoomLevels)
-	if clamped == zoomIndex then return end
-	zoomIndex = clamped
-	applyCameraZoom()
-end
 
-local function setCameraZoomFactor(factor)
-	for index, value in ipairs(cameraZoomLevels) do
-		if value == factor then
-			setCameraZoomIndex(index)
-			return
-		end
-	end
-	print("Requested zoom factor not available:", factor)
-end
-
-local function adjustCameraZoom(step)
-	if #cameraZoomLevels == 0 then return end
-	local newIndex = math.clamp(zoomIndex + step, 1, #cameraZoomLevels)
-	if newIndex ~= zoomIndex then
-		zoomIndex = newIndex
-		applyCameraZoom()
-	end
-end
-
-local function startCameraTracking()
-	-- หยุด connection เก่า
-	if cameraTrackConnection then
-		cameraTrackConnection:Disconnect()
-		cameraTrackConnection = nil
-	end
-
-	-- หา Camera part ใน rescue vehicle
-	local rescueVehicle = workspace:FindFirstChild(player.Name .. "_Rescue")
-	if not rescueVehicle then
-		print("No rescue vehicle found for camera tracking")
-		return false
-	end
-
-	local cameraPart = rescueVehicle:FindFirstChild("Camera")
-	if not cameraPart or not cameraPart:IsA("BasePart") then
-		print("No Camera part found in rescue vehicle")
-		return false
-	end
-
-	-- บันทึกค่าเดิม
-	if not isZoomMode then
-		originalCameraSubject = camera.CameraSubject
-		originalCameraType = camera.CameraType
-		isZoomMode = true
-		originalFieldOfView = camera.FieldOfView
-		zoomIndex = 1
-	end
-
-	-- ตั้งกล้องเป็น Scriptable
-	camera.CameraType = Enum.CameraType.Scriptable
-	applyCameraZoom()
-
-	-- เริ่มติดตาม Camera part โดยยื่นกล้องไปข้างหน้าในทิศทางแกน X
-	cameraTrackConnection = RunService.Heartbeat:Connect(function()
-		if cameraPart.Parent then -- ตรวจสอบว่า part ยังอยู่
-			-- ยื่นกล้องไปข้างหน้า 5 studs ในทิศทางแกน X ของ BasePart
-			local basePosition = cameraPart.Position
-			local rightVector = cameraPart.CFrame.RightVector -- แกน X ของ BasePart
-			local cameraPosition = basePosition + (rightVector * 5) -- ยื่นไป 5 studs
-			camera.CFrame = CFrame.lookAt(cameraPosition, cameraPosition + rightVector)
-		else
-			-- ถ้า Camera part หายไป ให้หยุดติดตาม
-			stopCameraTracking()
-		end
-	end)
-
-	print("Camera now tracking Camera part in rescue vehicle")
-	return true
-end
-
-function stopCameraTracking()
-	print("DEBUG: stopCameraTracking() called")
-	-- หยุด tracking connection
-	if cameraTrackConnection then
-		cameraTrackConnection:Disconnect()
-		cameraTrackConnection = nil
-	end
-
-	-- ปิด thermal vision ถ้าเปิดอยู่
-	if isThermalMode then
-		isThermalMode = false
-		if thermalEffect then
-			thermalEffect:Destroy()
-			thermalEffect = nil
-		end
-
-		-- ลบ ColorCorrection effect
-		if colorCorrection then
-			colorCorrection:Destroy()
-			colorCorrection = nil
-		end
-
-		-- คืนค่า Fog ปกติ
-		if originalFogEnd then
-			game.Lighting.FogEnd = originalFogEnd
-			game.Lighting.FogColor = Color3.new(0.75, 0.75, 0.75)
-		end
-
-		print("Thermal vision auto-disabled when closing camera tracking")
-	end
-
-	-- หยุดสแกน Humanoid ไม่ว่าจะเปิด thermal หรือไม่ (เผื่อมี highlight ค้างอยู่)
-	stopHumanoidScanning()
-
-	-- กลับไปใช้กล้องปกติ
-	if originalCameraSubject then
-		camera.CameraSubject = originalCameraSubject
-		camera.CameraType = originalCameraType or Enum.CameraType.Custom
-	else
-		camera.CameraType = Enum.CameraType.Custom
-		camera.CameraSubject = character.Humanoid
-	end
-
-	if originalFieldOfView then
-		camera.FieldOfView = originalFieldOfView
-	end
-	originalFieldOfView = nil
-	zoomIndex = 1
-
-	isZoomMode = false
-	print("Camera tracking stopped - back to normal view")
-end
-
-local function toggleCameraTracking()
-	if isZoomMode then
-		stopCameraTracking()
-	else
-		startCameraTracking()
-	end
-end
-
--- Thermal vision functions
-local function createThermalEffect()
-	-- สร้าง ScreenGui สำหรับ thermal effect
-	local screenGui = Instance.new("ScreenGui")
-	screenGui.Name = "ThermalVisionGui"
-	screenGui.IgnoreGuiInset = true
-	screenGui.Parent = player.PlayerGui
-
-	-- สร้าง Frame ปิดทั้งหน้าจอ
-	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(1, 0, 1, 0)
-	frame.Position = UDim2.new(0, 0, 0, 0)
-	frame.BackgroundColor3 = Color3.new(0, 0, 0) -- สีดำ
-	frame.BackgroundTransparency = 0.3 -- เล็กน้อยใส
-	frame.BorderSizePixel = 0
-	frame.Parent = screenGui
-
-	-- สร้าง thermal overlay effect
-	local thermalFrame = Instance.new("Frame")
-	thermalFrame.Size = UDim2.new(1, 0, 1, 0)
-	thermalFrame.Position = UDim2.new(0, 0, 0, 0)
-	thermalFrame.BackgroundColor3 = Color3.new(0.2, 0.8, 1) -- สีฟ้าน้ำเงิน
-	thermalFrame.BackgroundTransparency = 0.7
-	thermalFrame.BorderSizePixel = 0
-	thermalFrame.Parent = frame
-
-	-- เพิ่ม thermal text indicator
-	local thermalLabel = Instance.new("TextLabel")
-	thermalLabel.Size = UDim2.new(0, 200, 0, 50)
-	thermalLabel.Position = UDim2.new(0, 10, 0, 50)
-	thermalLabel.BackgroundTransparency = 1
-	thermalLabel.Text = "THERMAL VISION"
-	thermalLabel.TextColor3 = Color3.new(0, 1, 1) -- สีฟ้าอ่อน
-	thermalLabel.TextScaled = true
-	thermalLabel.Font = Enum.Font.Code
-	thermalLabel.Parent = frame
-
-	-- เพิ่มเอฟเฟกต์กระพริบ
-	spawn(function()
-		while thermalEffect and thermalEffect.Parent do
-			thermalFrame.BackgroundTransparency = 0.7
-			wait(0.5)
-			if thermalEffect and thermalEffect.Parent then
-				thermalFrame.BackgroundTransparency = 0.8
-				wait(0.5)
-			end
-		end
-	end)
-
-	return screenGui
-end
-
--- Humanoid detection functions
-local function createHumanoidHighlight(humanoidCharacter)
-	-- สร้าง Highlight effect สำหรับ Humanoid
-	local highlight = Instance.new("Highlight")
-	highlight.FillColor = Color3.new(1, 0.5, 0) -- สีส้ม
-	highlight.OutlineColor = Color3.new(1, 0.3, 0) -- สีส้มเข้ม
-	highlight.FillTransparency = 0.3
-	highlight.OutlineTransparency = 0
-	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop -- มองเห็นผ่านกำแพง
-	highlight.Parent = humanoidCharacter
-
-	return highlight
-end
-
-local function scanForHumanoids()
-	print("DEBUG: scanForHumanoids() called at", tick())
-	-- ล้าง highlight เก่า
-	for character, highlight in pairs(humanoidHighlights) do
-		if highlight then
-			highlight:Destroy()
-		end
-	end
-	humanoidHighlights = {}
-
-	-- สแกนหา Humanoid ทั้งหมดใน workspace
-	for _, obj in pairs(workspace:GetChildren()) do
-		if obj:IsA("Model") and obj:FindFirstChildOfClass("Humanoid") then
-			local humanoid = obj:FindFirstChildOfClass("Humanoid")
-			-- ตรวจสอบว่าเป็น character จริง (มี body parts)
-			if humanoid and obj:FindFirstChild("Head") and obj:FindFirstChild("Torso") or obj:FindFirstChild("UpperTorso") then
-				local highlight = createHumanoidHighlight(obj)
-				humanoidHighlights[obj] = highlight
-				print("Detected humanoid:", obj.Name)
-			end
-		end
-	end
-end
-
-local function startHumanoidScanning()
-	-- หยุด connection เก่า
-	if humanoidScanConnection then
-		humanoidScanConnection:Disconnect()
-		humanoidScanConnection = nil
-	end
-
-	-- ใช้ timer-based approach แทน wait() ใน Heartbeat
-	local lastScanTime = 0
-	local scanInterval = 2 -- สแกนทุก 2 วินาที
-
-	humanoidScanConnection = RunService.Heartbeat:Connect(function()
-		local currentTime = tick()
-		if currentTime - lastScanTime >= scanInterval then
-			scanForHumanoids()
-			lastScanTime = currentTime
-		end
-	end)
-
-	-- สแกนครั้งแรกทันที
-	scanForHumanoids()
-	print("DEBUG: Humanoid scanning started with proper timer")
-end
-
-
-local function toggleThermalVision()
-	if not isZoomMode then
-		print("Thermal vision only works in camera tracking mode. Press Z first!")
-		return
-	end
-
-	isThermalMode = not isThermalMode
-
-	if isThermalMode then
-		-- เปิด thermal vision
-		thermalEffect = createThermalEffect()
-
-		-- สร้าง ColorCorrection effect
-		colorCorrection = Instance.new("ColorCorrectionEffect")
-		colorCorrection.Brightness = 0.3
-		colorCorrection.Contrast = 0.5
-		colorCorrection.Saturation = -1 -- ลดสีให้เหมือน thermal
-		colorCorrection.TintColor = Color3.new(0.7, 0.9, 1) -- สีฟ้าเล็กน้อย
-		colorCorrection.Parent = game.Lighting
-
-		-- ปรับ Fog เพื่อให้มีบรรยากาศ thermal
-		originalFogEnd = game.Lighting.FogEnd
-		game.Lighting.FogColor = Color3.new(0.1, 0.3, 0.8)
-		game.Lighting.FogEnd = originalFogEnd * 0.7
-
-		-- เริ่มสแกน Humanoid
-		startHumanoidScanning()
-
-		print("Thermal vision ENABLED with Humanoid detection")
-	else
-		-- ปิด thermal vision
-		if thermalEffect then
-			thermalEffect:Destroy()
-			thermalEffect = nil
-		end
-
-		-- ลบ ColorCorrection effect
-		if colorCorrection then
-			colorCorrection:Destroy()
-			colorCorrection = nil
-		end
-
-		-- คืนค่า Fog ปกติ
-		if originalFogEnd then
-			game.Lighting.FogEnd = originalFogEnd
-			game.Lighting.FogColor = Color3.new(0.75, 0.75, 0.75) -- สีปกติ
-		end
-
-		-- หยุดสแกน Humanoid
-		stopHumanoidScanning()
-
-		print("Thermal vision DISABLED")
-	end
-end
-
--- ตรวจสอบว่าล้อกำลังฟรีหรือไม่
-local function isWheelSlipping()
-	-- ตรวจสอบจาก vehicleParts.primary
-	if vehicleParts.primary then
-		local velocity = vehicleParts.primary.Velocity
-		local speed = velocity.Magnitude
-		if speed < 2 and math.abs(throttleInput) > 0.5 then
-			print("Wheel slipping detected from vehicleParts.primary - Speed:", speed, "ThrottleInput:", throttleInput)
-			return true -- รถไม่เคลื่อนที่แต่เหยียบคันเร่ง
-		end
-	end
-
-	-- ตรวจสอบจาก VehicleSeat (ทั้ง manual และ normal VehicleSeat)
-	local vehicleSeat = nil
-	if manualVehicle then
-		vehicleSeat = manualVehicle:FindFirstChild("VehicleSeat") or manualVehicle:FindFirstChildOfClass("VehicleSeat")
-	elseif originalRescueModel then
-		vehicleSeat = originalRescueModel:FindFirstChild("VehicleSeat") or originalRescueModel:FindFirstChildOfClass("VehicleSeat")
-	end
-
-	if vehicleSeat then
-		local velocity = vehicleSeat.Velocity
-		local speed = velocity.Magnitude
-		local throttleFloat = vehicleSeat.ThrottleFloat or 0 -- ใช้ ThrottleFloat ของ VehicleSeat แทน
-
-		if speed < 2 and math.abs(throttleFloat) > 0.5 then
-			print("Wheel slipping detected from VehicleSeat - Speed:", speed, "ThrottleFloat:", throttleFloat)
-			return true -- รถไม่เคลื่อนที่แต่เหยียบคันเร่ง
-		end
-	end
-
-	return false
-end
-
--- ตรวจสอบว่ารถคว่ำ
-local function isVehicleFlipped()
-	-- หา VehicleSeat ปัจจุบัน
-	local vehicleSeat = nil
-	if manualVehicle then
-		vehicleSeat = manualVehicle:FindFirstChild("VehicleSeat") or manualVehicle:FindFirstChildOfClass("VehicleSeat")
-	elseif originalRescueModel then
-		vehicleSeat = originalRescueModel:FindFirstChild("VehicleSeat") or originalRescueModel:FindFirstChildOfClass("VehicleSeat")
-	end
-
-	if not vehicleSeat then
-		print("No VehicleSeat found for flip check")
-		return false
-	end
-
-	-- ตรวจสอบว่ารถคว่ำ (UpVector หันลง)
-	local upVector = vehicleSeat.CFrame.UpVector
-	local isFlipped = upVector.Y < 0.5 -- ถ้า Y น้อยกว่า 0.5 แปลว่าคว่ำ
-
-
-	return isFlipped
-end
-
--- ตรวจสอบว่ารถติดแม้ไม่คว่ำ (เช่น ล้อฟรีหรืออยู่บนเนิน)
-local function isVehicleStuck()
-	if isVehicleFlipped() then
-		return false
-	end
-
-	if isWheelSlipping() then
-		return true
-	end
-
-	local primaryPart = nil
-	if manualVehicle and manualVehicle.PrimaryPart then
-		primaryPart = manualVehicle.PrimaryPart
-	elseif originalRescueModel and originalRescueModel.PrimaryPart then
-		primaryPart = originalRescueModel.PrimaryPart
-	end
-
-	if not primaryPart then
-		return false
-	end
-
-	local speed = primaryPart.AssemblyLinearVelocity.Magnitude
-	if speed < 1 then
-		local upY = primaryPart.CFrame.UpVector.Y
-		if upY > 0.2 then
-			return true
-		end
-	end
-
-	return false
-end
-
--- ระบบ flip รถกลับคืน orientation เดิม
-local function flipVehicle()
-	-- หา VehicleSeat ในโมเดล
-	local vehicleSeat = nil
-	if manualVehicle then
-		vehicleSeat = manualVehicle:FindFirstChild("VehicleSeat") or manualVehicle:FindFirstChildOfClass("VehicleSeat")
-	elseif originalRescueModel then
-		vehicleSeat = originalRescueModel:FindFirstChild("VehicleSeat") or originalRescueModel:FindFirstChildOfClass("VehicleSeat")
-	end
-
-	if not vehicleSeat then return end
-
-	-- หาทิศทางที่รถควรจะหันหน้า (forward vector)
-	local currentCFrame = vehicleSeat.CFrame
-	local currentPos = currentCFrame.Position
-	local upVector = Vector3.new(0, 1, 0)
-
-	-- ใช้ LookVector ปัจจุบันแต่ปรับให้อยู่บนพื้นราบ
-	local forwardVector = currentCFrame.LookVector
-	forwardVector = Vector3.new(forwardVector.X, 0, forwardVector.Z).Unit
-
-	-- สร้าง CFrame ใหม่ที่หันหน้าไปทิศเดิมแต่ตั้งตรง
-	local newCFrame = CFrame.lookAt(currentPos, currentPos + forwardVector, upVector)
-
-	-- ยกรถขึ้นเล็กน้อยเพื่อไม่ให้ติดกับพื้น
-	newCFrame = newCFrame + Vector3.new(0, 2, 0)
-
-	-- Set ตำแหน่งใหม่ให้ทั้งโมเดล
-	if manualVehicle then
-		manualVehicle:SetPrimaryPartCFrame(newCFrame)
-	elseif originalRescueModel then
-		originalRescueModel:SetPrimaryPartCFrame(newCFrame)
-	end
-
-	-- รีเซ็ตความเร็ว VehicleSeat (VehicleSeat ไม่มี AngularVelocity)
-	vehicleSeat.Velocity = Vector3.new(0, 0, 0)
-
-	-- รีเซ็ตความเร็วของ primary part (ถ้ามี)
-	if manualVehicle and manualVehicle.PrimaryPart then
-		manualVehicle.PrimaryPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-		manualVehicle.PrimaryPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-	elseif originalRescueModel and originalRescueModel.PrimaryPart then
-		originalRescueModel.PrimaryPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-		originalRescueModel.PrimaryPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-	end
-
-	print("Vehicle flipped back to upright position!")
-end
-
--- ดันรถเล็กน้อยเพื่อให้หลุดจากเนินหรือล้อฟรี
-local function nudgeVehicle()
-	local vehicle = manualVehicle or originalRescueModel
-	if not vehicle then
-		print("No vehicle available for nudge")
-		return
-	end
-
-	local primaryPart = vehicle.PrimaryPart
-	if not primaryPart then
-		print("Vehicle has no PrimaryPart - cannot nudge")
-		return
-	end
-
-	if primaryPart.Anchored then
-		print("PrimaryPart anchored - cannot apply nudge")
-		return
-	end
-
-	local mass = primaryPart.AssemblyMass
-	if mass <= 0 then
-		return
-	end
-
-	local upwardImpulse = Vector3.new(0, mass * 90, 0)
-	local forwardImpulse = primaryPart.CFrame.LookVector * (mass * 35)
-	primaryPart:ApplyImpulse(upwardImpulse + forwardImpulse)
-
-	print("Vehicle nudged to regain traction")
-end
-
--- Setup vehicle parts สำหรับ manual control
-local function setupVehicleParts(vehicle)
-	vehicleParts = {}
-	manualVehicle = vehicle
-
-	local primary = vehicle.PrimaryPart
-	if not primary then return false end
-
-	vehicleParts.primary = primary
-	vehicleParts.attachmentFL = primary:FindFirstChild("AttachmentFL")
-	vehicleParts.attachmentFR = primary:FindFirstChild("AttachmentFR")
-	
-	if vehicleParts.attachmentFL and vehicleParts.attachmentFR then
-		vehicleParts.baseFL = vehicleParts.attachmentFL.Orientation
-		vehicleParts.baseFR = vehicleParts.attachmentFR.Orientation
-	end
-	
-	vehicleParts.wheelBL = vehicle:FindFirstChild("Wheel_BL")
-	vehicleParts.wheelBR = vehicle:FindFirstChild("Wheel_BR")
-	vehicleParts.wheelFL = vehicle:FindFirstChild("Wheel_FL")
-	vehicleParts.wheelFR = vehicle:FindFirstChild("Wheel_FR")
-
-	if not (vehicleParts.wheelBL and vehicleParts.wheelBR) then return false end
-	
-	vehicleParts.cylindricalBL = vehicleParts.wheelBL:FindFirstChildOfClass("CylindricalConstraint")
-	vehicleParts.cylindricalBR = vehicleParts.wheelBR:FindFirstChildOfClass("CylindricalConstraint")
-	
-	if vehicleParts.wheelFL then
-		vehicleParts.cylindricalFL = vehicleParts.wheelFL:FindFirstChildOfClass("CylindricalConstraint")
-	end
-	if vehicleParts.wheelFR then
-		vehicleParts.cylindricalFR = vehicleParts.wheelFR:FindFirstChildOfClass("CylindricalConstraint")
-	end
-	
-	if not (vehicleParts.cylindricalBL and vehicleParts.cylindricalBR) then return false end
-	
-	local radius = vehicleParts.wheelBR.Size.Y * 0.5
-	vehicleParts.maxAngularVelocity = 15 / radius -- รักษาความเร็วปกติ
-	
-	return true
-end
 
 -- สร้าง SurfaceGui สำหรับ flip รถ
 local function createFlipGui(vehicle)
@@ -805,7 +162,7 @@ end
 -- อัปเดตสถานะ Flip GUI
 local function updateFlipGui()
 	if flipSurfaceGui then
-		local shouldEnable = isVehicleFlipped()
+		local shouldEnable = VehicleController.isVehicleFlipped()
 		local wasEnabled = flipSurfaceGui.Enabled
 		flipSurfaceGui.Enabled = shouldEnable
 
@@ -824,16 +181,17 @@ end
 local function updateManualControls()
 	if not isRescueMode then return end
 	-- ส่งข้อมูลไปยัง server แทนการควบคุมเอง (เฉพาะ companion mode)
-	if rescueModel and not originalRescueModel then
-		controlEvent:FireServer(throttleInput, steerInput)
+	if rescueModel and not VehicleController.getOriginalRescueModel() then
+		controlEvent:FireServer(VehicleController.getThrottleInput(), VehicleController.getSteerInput())
 	end
 end
 
 -- ส่งข้อมูลการควบคุม Original Rescue ไปยัง server
 local function updateOriginalRescueControls()
+	local originalRescueModel = VehicleController.getOriginalRescueModel()
 	if not originalRescueModel then return end
 	-- ส่งข้อมูลไปยัง server สำหรับ original rescue control
-	controlOriginalRescueEvent:FireServer(throttleInput, steerInput)
+	controlOriginalRescueEvent:FireServer(VehicleController.getThrottleInput(), VehicleController.getSteerInput())
 end
 
 local function stopRescueMode()
@@ -841,9 +199,9 @@ local function stopRescueMode()
 
 	isRescueMode = false
 
-	-- รีเซ็ต inputs
-	throttleInput = 0
-	steerInput = 0
+	-- รีเซ็ต inputs ใน VehicleController
+	VehicleController.setThrottleInput(0)
+	VehicleController.setSteerInput(0)
 
 	-- ส่งคำสั่งหยุดไปยัง server
 	stopControlEvent:FireServer()
@@ -854,9 +212,8 @@ local function stopRescueMode()
 		camera.CameraSubject = character.Humanoid
 	end
 	
-	-- ล้างตัวแปร
-	vehicleParts = {}
-	manualVehicle = nil
+	-- ล้างตัวแปรใน VehicleController
+	VehicleController.clearVehicleParts()
 
 	-- ลบ flip GUI
 	if flipSurfaceGui then
@@ -949,23 +306,25 @@ character:WaitForChild("Humanoid").Seated:Connect(function(active, seatPart)
 		cylindricalFR = wheelFR:FindFirstChildOfClass("CylindricalConstraint")
 	end
 
-	initializeWheelConstraint(cylindricalBL)
-	initializeWheelConstraint(cylindricalBR)
+	local constants = VehicleController.getConstants()
+
+	VehicleController.initializeWheelConstraint(cylindricalBL)
+	VehicleController.initializeWheelConstraint(cylindricalBR)
 	if cylindricalFL then
-		initializeWheelConstraint(cylindricalFL, MAX_WHEEL_TORQUE * FRONT_TORQUE_FACTOR)
+		VehicleController.initializeWheelConstraint(cylindricalFL, constants.MAX_WHEEL_TORQUE * constants.FRONT_TORQUE_FACTOR)
 	end
 	if cylindricalFR then
-		initializeWheelConstraint(cylindricalFR, MAX_WHEEL_TORQUE * FRONT_TORQUE_FACTOR)
+		VehicleController.initializeWheelConstraint(cylindricalFR, constants.MAX_WHEEL_TORQUE * constants.FRONT_TORQUE_FACTOR)
 	end
 
-	local initialFrontBrake = BRAKE_TORQUE * FRONT_TORQUE_FACTOR
-	setWheelTargets(cylindricalBL, 0, BRAKE_TORQUE)
-	setWheelTargets(cylindricalBR, 0, BRAKE_TORQUE)
+	local initialFrontBrake = constants.BRAKE_TORQUE * constants.FRONT_TORQUE_FACTOR
+	VehicleController.setWheelTargets(cylindricalBL, 0, constants.BRAKE_TORQUE)
+	VehicleController.setWheelTargets(cylindricalBR, 0, constants.BRAKE_TORQUE)
 	if cylindricalFL then
-		setWheelTargets(cylindricalFL, 0, initialFrontBrake)
+		VehicleController.setWheelTargets(cylindricalFL, 0, initialFrontBrake)
 	end
 	if cylindricalFR then
-		setWheelTargets(cylindricalFR, 0, initialFrontBrake)
+		VehicleController.setWheelTargets(cylindricalFR, 0, initialFrontBrake)
 	end
 
 	-- คำนวณความเร็วเชิงมุมสูงสุดจาก MaxSpeed และรัศมีล้อที่ขับ (BR)
@@ -1013,17 +372,17 @@ character:WaitForChild("Humanoid").Seated:Connect(function(active, seatPart)
 	connectionThrottle = seatPart:GetPropertyChangedSignal("ThrottleFloat"):Connect(function()
 		local throttle = seatPart.ThrottleFloat or 0
 		local dir = sign(throttle)
-		local frontBrakeTorque = BRAKE_TORQUE * FRONT_TORQUE_FACTOR
+		local frontBrakeTorque = constants.BRAKE_TORQUE * constants.FRONT_TORQUE_FACTOR
 
 		-- ไม่มีคันเร่ง -> หยุดรถทันทีด้วยแรงเบรก (กันรถไหล/creep)
 		if dir == 0 or maxAngularVelocity == 0 then
-			setWheelTargets(cylindricalBL, 0, BRAKE_TORQUE)
-			setWheelTargets(cylindricalBR, 0, BRAKE_TORQUE)
+			VehicleController.setWheelTargets(cylindricalBL, 0, constants.BRAKE_TORQUE)
+			VehicleController.setWheelTargets(cylindricalBR, 0, constants.BRAKE_TORQUE)
 			if cylindricalFL then
-				setWheelTargets(cylindricalFL, 0, frontBrakeTorque)
+				VehicleController.setWheelTargets(cylindricalFL, 0, frontBrakeTorque)
 			end
 			if cylindricalFR then
-				setWheelTargets(cylindricalFR, 0, frontBrakeTorque)
+				VehicleController.setWheelTargets(cylindricalFR, 0, frontBrakeTorque)
 			end
 			return
 		end
@@ -1071,18 +430,18 @@ character:WaitForChild("Humanoid").Seated:Connect(function(active, seatPart)
 			end
 		end
 
-		torque = math.clamp(torque, minTorque, MAX_WHEEL_TORQUE)
+		torque = math.clamp(torque, minTorque, constants.MAX_WHEEL_TORQUE)
 		targetAV = math.clamp(targetAV, -maxAngularVelocity * 3, maxAngularVelocity * 3)
-		local frontTorque = math.clamp(torque * FRONT_TORQUE_FACTOR, minTorque * FRONT_TORQUE_FACTOR, MAX_WHEEL_TORQUE * FRONT_TORQUE_FACTOR)
+		local frontTorque = math.clamp(torque * constants.FRONT_TORQUE_FACTOR, minTorque * constants.FRONT_TORQUE_FACTOR, constants.MAX_WHEEL_TORQUE * constants.FRONT_TORQUE_FACTOR)
 		frontTorque = math.max(frontTorque, frontBrakeTorque)
-		
-		setWheelTargets(cylindricalBL, targetAV, torque)
-		setWheelTargets(cylindricalBR, targetAV, torque)
+
+		VehicleController.setWheelTargets(cylindricalBL, targetAV, torque)
+		VehicleController.setWheelTargets(cylindricalBR, targetAV, torque)
 		if cylindricalFL then
-			setWheelTargets(cylindricalFL, targetAV, frontTorque)
+			VehicleController.setWheelTargets(cylindricalFL, targetAV, frontTorque)
 		end
 		if cylindricalFR then
-			setWheelTargets(cylindricalFR, targetAV, frontTorque)
+			VehicleController.setWheelTargets(cylindricalFR, targetAV, frontTorque)
 		end
 	end)
 end)
@@ -1180,7 +539,7 @@ function startRescueMode(useCamera)
 		print("Player can move freely while controlling RescueCompanion")
 		
 		-- Setup การควบคุมแบบ manual
-		local success = setupVehicleParts(rescueModel)
+		local success = VehicleController.setupVehicle(rescueModel)
 		if success then
 			-- สร้าง flip GUI
 			createFlipGui(rescueModel)
@@ -1261,6 +620,7 @@ local function exitGame()
 end
 
 function startOriginalRescueMode()
+	local originalRescueModel = VehicleController.getOriginalRescueModel()
 	print("startOriginalRescueMode called, originalRescueModel exists:", originalRescueModel ~= nil)
 
 	-- เช็คว่ามี original rescue model อยู่แล้วหรือไม่
@@ -1280,27 +640,8 @@ function startOriginalRescueMode()
 	isRescueMode = true
 	print("Set isRescueMode = true")
 
-	-- สุ่ม spawn point จาก workspace.SpawnRescues ก่อน
-	local finalSpawnPosition = nil
-	local spawnRescues = workspace:FindFirstChild("SpawnRescues")
-	if spawnRescues then
-		local spawnPoints = {}
-		for _, child in ipairs(spawnRescues:GetChildren()) do
-			if child:IsA("BasePart") then
-				table.insert(spawnPoints, child)
-			end
-		end
-
-		if #spawnPoints > 0 then
-			local randomSpawnPoint = spawnPoints[math.random(1, #spawnPoints)]
-			finalSpawnPosition = randomSpawnPoint.Position + Vector3.new(0, 5, 0) -- เว้นระยะจากพื้น
-			print("Selected random spawn point:", randomSpawnPoint.Name, "at position:", finalSpawnPosition)
-		else
-			warn("No spawn points found in SpawnRescues folder")
-		end
-	else
-		warn("SpawnRescues folder not found in workspace")
-	end
+	-- ใช้ SpawnPointManager เพื่อขอ spawn point จาก server
+	local finalSpawnPosition = SpawnPointManager.getSpawnPoint(5) -- timeout 5 วินาที
 
 	-- ถ้าไม่มี spawn point ให้ใช้ตำแหน่งผู้เล่นแทน
 	if not finalSpawnPosition and character and character.PrimaryPart then
@@ -1315,12 +656,15 @@ function startOriginalRescueMode()
 	wait(0.5)
 
 	-- หา model ที่ server สร้าง
-	originalRescueModel = workspace:FindFirstChild(player.Name .. "_Rescue")
+	local originalRescueModel = workspace:FindFirstChild(player.Name .. "_Rescue")
 	if not originalRescueModel then
 		warn("Original Rescue Model not found after server spawn")
 		isRescueMode = false
 		return
 	end
+
+	-- เก็บใน VehicleController
+	VehicleController.setOriginalRescueModel(originalRescueModel)
 
 	if character and character.PrimaryPart and character:FindFirstChild("Humanoid") then
 		print("Setting up original Rescue Mode...")
@@ -1375,15 +719,15 @@ function stopOriginalRescueMode()
 		connections.originalRescueControl = nil
 	end
 
-	-- รีเซ็ต inputs
-	throttleInput = 0
-	steerInput = 0
+	-- รีเซ็ต inputs ใน VehicleController
+	VehicleController.setThrottleInput(0)
+	VehicleController.setSteerInput(0)
 
 	-- ส่งคำสั่งหยุดไป server
 	stopOriginalRescueEvent:FireServer()
 
 	-- หยุด camera tracking
-	stopCameraTracking()
+	CameraSystem.stopCameraTracking()
 
 	-- ปลดล็อค character และคืน camera
 	if character and character:FindFirstChild("Humanoid") then
@@ -1392,21 +736,23 @@ function stopOriginalRescueMode()
 			character.PrimaryPart.Anchored = false
 		end
 
-		-- กล้องจะถูก reset ใน stopCameraTracking() แล้ว แต่เผื่อไว้
-		if not isZoomMode then
+		-- กล้องจะถูก reset ใน CameraSystem.stopCameraTracking() แล้ว แต่เผื่อไว้
+		if not CameraSystem.isInZoomMode() then
 			camera.CameraType = Enum.CameraType.Custom
 			camera.CameraSubject = character.Humanoid
 		end
 
 		-- เทเลพอร์ตออกจากรถ
+		local originalRescueModel = VehicleController.getOriginalRescueModel()
 		if character.PrimaryPart and originalRescueModel and originalRescueModel.PrimaryPart then
 			local exitPos = originalRescueModel.PrimaryPart.Position + Vector3.new(5, 3, 0)
 			character:SetPrimaryPartCFrame(CFrame.new(exitPos))
 		end
 	end
 
-	vehicleParts = {}
-	manualVehicle = nil
+	-- ล้างตัวแปรใน VehicleController
+	VehicleController.clearVehicleParts()
+	VehicleController.setOriginalRescueModel(nil)
 
 	-- ลบ flip GUI
 	if flipSurfaceGui then
@@ -1417,9 +763,7 @@ function stopOriginalRescueMode()
 	-- หยุด Game Timer
 	GameTimer.stopTimer()
 
-	-- ไม่ต้องลบ originalRescueModel เพราะ server จัดการแล้ว
-	originalRescueModel = nil
-
+	-- originalRescueModel ถูกล้างใน VehicleController แล้ว
 	isRescueMode = false
 
 	-- ให้ผู้เล่นคนนี้สามารถเข้าเกมใหม่ได้
@@ -1444,7 +788,7 @@ connections.inputBegan = UserInputService.InputBegan:Connect(function(input, gam
 	if gameProcessed then return end
 
 	if input.KeyCode == Enum.KeyCode.F then
-		if originalRescueModel then
+		if VehicleController.getOriginalRescueModel() then
 			stopOriginalRescueMode()
 		elseif isRescueMode then
 			stopRescueMode()
@@ -1454,25 +798,25 @@ connections.inputBegan = UserInputService.InputBegan:Connect(function(input, gam
 	-- Camera tracking controls
 	if input.KeyCode == Enum.KeyCode.Z then
 		-- กด Z เพื่อ toggle camera tracking (ติดตาม Camera part ของ rescue vehicle)
-		print("DEBUG: Z key pressed, calling toggleCameraTracking()")
-		toggleCameraTracking()
+		print("DEBUG: Z key pressed, calling CameraSystem.toggleCameraTracking()")
+		CameraSystem.toggleCameraTracking()
 	elseif input.KeyCode == Enum.KeyCode.X then
 		-- กด X เพื่อ toggle thermal vision (ต้องเปิด camera tracking ก่อน)
-		toggleThermalVision()
+		CameraSystem.toggleThermalVision()
 	end
 
-	if isZoomMode then
+	if CameraSystem.isInZoomMode() then
 		if input.KeyCode == Enum.KeyCode.One then
-			setCameraZoomFactor(1)
+			CameraSystem.setCameraZoomFactor(1)
 		elseif input.KeyCode == Enum.KeyCode.Two then
-			setCameraZoomFactor(2)
+			CameraSystem.setCameraZoomFactor(2)
 		elseif input.KeyCode == Enum.KeyCode.Five then
-			setCameraZoomFactor(5)
+			CameraSystem.setCameraZoomFactor(5)
 		end
 	end
 
 	-- คลิกที่ไหนบนหน้าจอก็ได้เพื่อเจาะหรือเปิดใช้ hydraulic arm (เฉพาะใน rescue mode)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 and (isRescueMode or originalRescueModel) then
+	if input.UserInputType == Enum.UserInputType.MouseButton1 and (isRescueMode or VehicleController.getOriginalRescueModel()) then
 		-- ได้ตำแหน่งของเมาส์
 		local mouse = player:GetMouse()
 		local clickPosition = mouse.Hit.Position
@@ -1489,26 +833,22 @@ connections.inputBegan = UserInputService.InputBegan:Connect(function(input, gam
 	-- Manual control inputs (เฉพาะเมื่ออยู่ใน Rescue Mode)
 	if isRescueMode then
 		if input.KeyCode == Enum.KeyCode.W then
-			throttleInput = 1
+			VehicleController.setThrottleInput(1)
 		elseif input.KeyCode == Enum.KeyCode.S then
-			throttleInput = -0.8
+			VehicleController.setThrottleInput(-0.8)
 		elseif input.KeyCode == Enum.KeyCode.A then
-			steerInput = 1
+			VehicleController.setSteerInput(1)
 		elseif input.KeyCode == Enum.KeyCode.D then
-			steerInput = -1
+			VehicleController.setSteerInput(-1)
 		elseif input.KeyCode == Enum.KeyCode.Space then
 			-- กด SPACE เพื่อ flip รถเมื่อคว่ำ หรือดันรถถ้าแค่ติดอยู่
-			if isVehicleFlipped() then
-				flipVehicle()
-			elseif isVehicleStuck() then
-				nudgeVehicle()
-			end
+			VehicleController.handleSpaceKey()
 		end
 	end
 end)
 
 connections.inputChanged = UserInputService.InputChanged:Connect(function(input)
-	if not isZoomMode then return end
+	if not CameraSystem.isInZoomMode() then return end
 
 	if input.UserInputType == Enum.UserInputType.MouseWheel then
 		local direction = 0
@@ -1519,18 +859,18 @@ connections.inputChanged = UserInputService.InputChanged:Connect(function(input)
 		end
 
 		if direction ~= 0 then
-			adjustCameraZoom(direction)
+			CameraSystem.adjustCameraZoom(direction)
 		end
 	end
 end)
 
 connections.inputEnded = UserInputService.InputEnded:Connect(function(input, gameProcessed)
 	if not isRescueMode then return end
-	
+
 	if input.KeyCode == Enum.KeyCode.W or input.KeyCode == Enum.KeyCode.S then
-		throttleInput = 0
+		VehicleController.setThrottleInput(0)
 	elseif input.KeyCode == Enum.KeyCode.A or input.KeyCode == Enum.KeyCode.D then
-		steerInput = 0
+		VehicleController.setSteerInput(0)
 	end
 end)
 
