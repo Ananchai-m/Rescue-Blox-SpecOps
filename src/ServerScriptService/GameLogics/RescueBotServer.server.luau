@@ -40,6 +40,9 @@ local waitingSystemRemote = getOrCreateRemote("WaitingSystem")
 local mapVotingRemote = getOrCreateRemote("MapVoting")
 local CompanionFollower = require(script.Parent:WaitForChild("CompanionFollower"))
 
+-- Import VictimSpawner
+local VictimSpawner = require(ReplicatedStorage.Modules.VictimSpawner)
+
 -- เก็บข้อมูลรถของแต่ละผู้เล่น
 local playerVehicles = {}
 local vehicleConnections = {}
@@ -812,6 +815,15 @@ local function startGame()
 		table.insert(playersArray, player.Name)
 	end
 
+	-- Spawn victims ทั้งหมด
+	print("Spawning victims for the game...")
+	local victimsSpawned = VictimSpawner.spawnAllVictims()
+	if victimsSpawned then
+		print("Victims spawned successfully")
+	else
+		warn("Failed to spawn victims")
+	end
+
 	-- แจ้ง clients ให้เริ่มเกม
 	waitingSystemRemote:FireAllClients("startGame", playersArray)
 
@@ -822,6 +834,11 @@ local function startGame()
 	spawn(function()
 		wait(300) -- 5 minutes
 		isGamePlaying = false
+
+		-- ลบ victims เมื่อเกมจบ
+		print("Game ended - clearing all victims...")
+		VictimSpawner.clearAllVictims()
+
 		print("Server: Game ended - accepting new players")
 		waitingSystemRemote:FireAllClients("gameEnded")
 	end)
@@ -922,5 +939,19 @@ Players.PlayerRemoving:Connect(function(player)
 		mapVotingRemote:FireAllClients("updateVotes", currentVotes, playerVotes)
 	end
 end)
+
+-- ตรวจสอบ VictimSpawner setup
+print("Checking VictimSpawner setup...")
+local templateReady, templateMessage = VictimSpawner.checkTemplate()
+print("Template check:", templateMessage)
+
+local spawnPointsReady, spawnPointsMessage = VictimSpawner.checkSpawnPoints()
+print("Spawn points check:", spawnPointsMessage)
+
+if templateReady and spawnPointsReady then
+	print("VictimSpawner is ready!")
+else
+	warn("VictimSpawner setup incomplete - victims may not spawn properly")
+end
 
 print("RescueBotServer loaded")
