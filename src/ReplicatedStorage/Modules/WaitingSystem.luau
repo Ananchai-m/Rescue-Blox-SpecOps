@@ -7,6 +7,8 @@ local WaitingSystem = {}
 local waitingPlayers = {}
 local maxPlayers = 1
 local simuBillboard = nil
+local isCountingDown = false
+local isGamePlaying = false
 
 -- ฟังก์ชันหา Simu BillboardGui
 local function findSimuBillboard()
@@ -55,8 +57,14 @@ local function updateWaitingMessage()
 	local waitingCount = #waitingPlayers
 	local remaining = maxPlayers - waitingCount
 
-	if waitingCount > 0 and remaining > 0 then
-		simuBillboard.Text = string.format("รอผู้เล่นอื่น %d/%d คน", remaining, maxPlayers)
+	if isGamePlaying then
+		simuBillboard.Text = "Game Playing!"
+		simuBillboard.Visible = true
+	elseif waitingCount > 0 and remaining > 0 then
+		simuBillboard.Text = string.format("Waiting for other players %d/%d คน", remaining, maxPlayers)
+		simuBillboard.Visible = true
+	elseif waitingCount == 0 then 
+		simuBillboard.Text = "Please join the mission!"
 		simuBillboard.Visible = true
 	else
 		simuBillboard.Text = ""
@@ -102,18 +110,51 @@ function WaitingSystem.removeWaitingPlayer(player)
 	return false
 end
 
+-- ฟังก์ชันนับถอยหลัง
+local function startCountdown()
+	if isCountingDown then return end
+	isCountingDown = true
+
+	-- แสดงข้อความเริ่มนับถอยหลัง
+	if simuBillboard then
+		for countdown = 5, 1, -1 do
+			simuBillboard.Text = "The mission will start in " .. countdown .. " seconds!"
+			simuBillboard.Visible = true
+			wait(1)
+		end
+
+		-- ซ่อนข้อความ
+		simuBillboard.Text = ""
+		simuBillboard.Visible = false
+	else
+		-- ถ้าไม่มี billboard ให้รอ 5 วินาทีเฉยๆ
+		wait(5)
+	end
+
+	isCountingDown = false
+end
+
 -- ฟังก์ชันเริ่มเกม
 function WaitingSystem.startGame()
-	print("Starting game with " .. #waitingPlayers .. " players!")
+	print("Starting countdown with " .. #waitingPlayers .. " players!")
 
-	-- ล้างรายการผู้เล่นที่รอ
-	waitingPlayers = {}
+	-- เริ่มนับถอยหลัง
+	spawn(function()
+		startCountdown()
+		isGamePlaying = true
+		print("Game starting now!")
+		-- ล้างรายการผู้เล่นที่รอ
+		waitingPlayers = {}
+		updateWaitingMessage()
+		-- ที่นี่สามารถเพิ่มโค้ดสำหรับเริ่มเกมได้
+		-- เช่น teleport ผู้เล่น, เปิด UI เกม, ฯลฯ
+	end)
+end
 
-	-- ซ่อนข้อความ
+function WaitingSystem.stopGame() 
+	isGamePlaying = false 
 	updateWaitingMessage()
-
-	-- ที่นี่สามารถเพิ่มโค้ดสำหรับเริ่มเกมได้
-	-- เช่น teleport ผู้เล่น, เปิด UI เกม, ฯลฯ
+	print("Game stopped")
 end
 
 -- ฟังก์ชันรีเซ็ตระบบ

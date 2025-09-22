@@ -1226,9 +1226,13 @@ local function setupSimuTouched()
 				local gameReady = WaitingSystem.addWaitingPlayer(player)
 
 				if gameReady then
-					-- ครบจำนวนแล้ว เริ่มเกม
-					print("Game ready - Starting original Rescue Mode")
-					startOriginalRescueMode() -- บังคับ Rescue Model แบบเดิม
+					-- ครบจำนวนแล้ว เริ่มนับถอยหลัง แล้วจึงเริ่มเกม
+					print("Game ready - Starting countdown then original Rescue Mode")
+					-- รอให้ countdown เสร็จ แล้วจึงเริ่มเกม
+					spawn(function()
+						wait(6) -- รอให้ countdown 5 วินาทีเสร็จ + buffer 1 วินาที
+						startOriginalRescueMode() -- บังคับ Rescue Model แบบเดิม
+					end)
 				else
 					-- ยังไม่ครบ แสดงข้อความรอ
 					print("Waiting for more players...")
