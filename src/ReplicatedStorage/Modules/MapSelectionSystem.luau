@@ -222,13 +222,6 @@ local function updatePlayerVoteDisplay(player)
 				local localPlayer = Players.LocalPlayer
 				local localPlayerVotedMap = votingPlayers[localPlayer] or 0
 
-				-- Debug log
-				if i == 1 then -- แสดง debug เฉพาะ map แรก
-					print("DEBUG: localPlayer =", localPlayer and localPlayer.Name)
-					print("DEBUG: localPlayerVotedMap =", localPlayerVotedMap)
-					print("DEBUG: checking map index =", i)
-					print("DEBUG: votingPlayers =", votingPlayers)
-				end
 
 				if localPlayerVotedMap == i then
 					-- Local player โหวดให้ map นี้ - แสดง stroke สีเขียว

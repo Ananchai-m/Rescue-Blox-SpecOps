@@ -11,6 +11,7 @@ local DrillConfig = require(ReplicatedStorage.Modules.DrillConfig)
 local DrillSystem = require(ReplicatedStorage.Modules.DrillSystem)
 local WaitingSystem = require(ReplicatedStorage.Modules.WaitingSystem)
 local MapSelectionSystem = require(ReplicatedStorage.Modules.MapSelectionSystem)
+local GameTimer = require(ReplicatedStorage.Modules.GameTimer)
 
 -- รอ RemoteEvents
 local remoteEvents = ReplicatedStorage:WaitForChild("RescueBotRemotes")
@@ -58,9 +59,6 @@ local WHEEL_SMOOTH_SPEED = 10
 -- Flip system variables
 local flipSurfaceGui = nil
 
--- Game timer variables
-local gameTimerGui = nil
-local timerConnection = nil
 
 -- Client-side waiting system variables
 local currentWaitingCount = 0
@@ -822,97 +820,6 @@ local function updateFlipGui()
 	end
 end
 
--- สร้าง Game Timer GUI สำหรับนับถอยหลัง 5 นาที
-local function createGameTimerGui()
-	-- ลบ GUI เก่าถ้ามี
-	if gameTimerGui then
-		gameTimerGui:Destroy()
-		gameTimerGui = nil
-	end
-
-	-- หยุด timer connection เก่าถ้ามี
-	if timerConnection then
-		timerConnection:Disconnect()
-		timerConnection = nil
-	end
-
-	-- สร้าง ScreenGui
-	gameTimerGui = Instance.new("ScreenGui")
-	gameTimerGui.Name = "GameTimerGui"
-	gameTimerGui.ResetOnSpawn = false
-	gameTimerGui.IgnoreGuiInset = true
-	gameTimerGui.Parent = player.PlayerGui
-
-	-- สร้าง Frame หลัก
-	local mainFrame = Instance.new("Frame")
-	mainFrame.Name = "TimerFrame"
-	mainFrame.Size = UDim2.new(0.2, 0, 0.08, 0)
-	mainFrame.Position = UDim2.new(0.4, 0, 0.05, 0) -- อยู่ตรงกลางด้านบน
-	mainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-	mainFrame.BackgroundTransparency = 0.3
-	mainFrame.BorderSizePixel = 0
-	mainFrame.Parent = gameTimerGui
-
-	-- สร้าง UICorner สำหรับ Frame
-	local frameCorner = Instance.new("UICorner")
-	frameCorner.CornerRadius = UDim.new(0, 8)
-	frameCorner.Parent = mainFrame
-
-	-- สร้าง TextLabel สำหรับแสดงเวลา
-	local timerLabel = Instance.new("TextLabel")
-	timerLabel.Name = "TimerLabel"
-	timerLabel.Size = UDim2.new(1, 0, 1, 0)
-	timerLabel.Position = UDim2.new(0, 0, 0, 0)
-	timerLabel.BackgroundTransparency = 1
-	timerLabel.Text = "05:00"
-	timerLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	timerLabel.TextScaled = true
-	timerLabel.Font = Enum.Font.GothamBold
-	timerLabel.Parent = mainFrame
-
-	-- เริ่มนับถอยหลังจาก 5 นาที (300 วินาที)
-	local timeLeft = 300
-
-	-- ฟังก์ชันอัปเดตเวลา
-	local function updateTimer()
-		local minutes = math.floor(timeLeft / 60)
-		local seconds = timeLeft % 60
-		timerLabel.Text = string.format("%02d:%02d", minutes, seconds)
-
-		-- เปลี่ยนสีเมื่อเวลาเหลือน้อย
-		if timeLeft <= 60 then
-			timerLabel.TextColor3 = Color3.fromRGB(255, 100, 100) -- แดง
-		elseif timeLeft <= 120 then
-			timerLabel.TextColor3 = Color3.fromRGB(255, 255, 100) -- เหลือง
-		else
-			timerLabel.TextColor3 = Color3.fromRGB(255, 255, 255) -- ขาว
-		end
-
-		timeLeft = timeLeft - 1
-
-		-- เมื่อหมดเวลา
-		if timeLeft < 0 then
-			timerLabel.Text = "00:00"
-			timerLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
-			if timerConnection then
-				timerConnection:Disconnect()
-				timerConnection = nil
-			end
-			print("Game timer finished!")
-		end
-	end
-
-	-- เริ่ม timer
-	timerConnection = task.spawn(function()
-		while timeLeft >= 0 and gameTimerGui and gameTimerGui.Parent do
-			updateTimer()
-			task.wait(1)
-		end
-	end)
-
-	print("Game Timer GUI created - 5 minute countdown started")
-end
-
 -- ส่งข้อมูลการควบคุมไปยัง server (สำหรับ companion)
 local function updateManualControls()
 	if not isRescueMode then return end
@@ -1446,8 +1353,8 @@ function startOriginalRescueMode()
 		-- สร้าง flip GUI สำหรับ original rescue
 		createFlipGui(originalRescueModel)
 
-		-- สร้าง Timer GUI
-		createGameTimerGui()
+		-- เริ่ม Game Timer (5 นาที)
+		GameTimer.startCountdown(300)
 
 		connections.originalRescueControl = RunService.Heartbeat:Connect(function()
 			updateOriginalRescueControls() -- ส่ง input ไป server
@@ -1506,6 +1413,9 @@ function stopOriginalRescueMode()
 		flipSurfaceGui:Destroy()
 		flipSurfaceGui = nil
 	end
+
+	-- หยุด Game Timer
+	GameTimer.stopTimer()
 
 	-- ไม่ต้องลบ originalRescueModel เพราะ server จัดการแล้ว
 	originalRescueModel = nil
