@@ -671,6 +671,15 @@ end)
 
 -- Spawn Original Rescue Model
 spawnOriginalRescueEvent.OnServerEvent:Connect(function(player, position)
+	-- หยุดสว่านก่อน spawn รถใหม่
+	local drillState = playerDrillStates[player]
+	if drillState then
+		drillState.isActive = false
+		stopDrillSpin(drillState)
+		playerDrillStates[player] = nil
+		print("Stopped drill before spawning new rescue vehicle for", player.Name)
+	end
+
 	-- ลบ original rescue model เก่า (ถ้ามี)
 	if playerOriginalRescue[player] then
 		playerOriginalRescue[player]:Destroy()
