@@ -9,6 +9,7 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 -- Import shared modules
 local DrillConfig = require(ReplicatedStorage.Modules.DrillConfig)
 local DrillSystem = require(ReplicatedStorage.Modules.DrillSystem)
+local WaitingSystem = require(ReplicatedStorage.Modules.WaitingSystem)
 
 -- รอ RemoteEvents
 local remoteEvents = ReplicatedStorage:WaitForChild("RescueBotRemotes")
@@ -1215,13 +1216,24 @@ local function setupSimuTouched()
 	if simu and simu:IsA("BasePart") then
 		connections.simuTouched = simu.Touched:Connect(function(hit)
 			if simuDebounce then return end
-			
+
 			local humanoidHit = hit.Parent:FindFirstChildOfClass("Humanoid")
 			if humanoidHit and hit.Parent == character then
 				simuDebounce = true
-				print("Touched Simu - Starting original Rescue Mode")
-				startOriginalRescueMode() -- บังคับ Rescue Model แบบเดิม
-				
+				print("Touched Simu - Adding player to waiting list")
+
+				-- เพิ่มผู้เล่นเข้าคิวรอ
+				local gameReady = WaitingSystem.addWaitingPlayer(player)
+
+				if gameReady then
+					-- ครบจำนวนแล้ว เริ่มเกม
+					print("Game ready - Starting original Rescue Mode")
+					startOriginalRescueMode() -- บังคับ Rescue Model แบบเดิม
+				else
+					-- ยังไม่ครบ แสดงข้อความรอ
+					print("Waiting for more players...")
+				end
+
 				-- Reset debounce หลัง 2 วินาที (ใช้ spawn เพื่อไม่ block)
 				spawn(function()
 					wait(2)
