@@ -682,16 +682,22 @@ spawnOriginalRescueEvent.OnServerEvent:Connect(function(player, position)
 		return
 	end
 
-	-- ตั้งตำแหน่งที่ SpawnRescue หรือใกล้ผู้เล่น
-	local spawnRescue = workspace:FindFirstChild("SpawnRescue")
-	if spawnRescue then
-		print("Found SpawnRescue, pivoting to:", spawnRescue.CFrame.Position)
-		originalRescueModel:PivotTo(spawnRescue.CFrame)
-	elseif player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-		print("No SpawnRescue found, spawning near player")
-		originalRescueModel:PivotTo(CFrame.new(player.Character.HumanoidRootPart.Position + Vector3.new(10, 5, 0)))
+	-- ตั้งตำแหน่งตาม position parameter ที่ส่งมา หรือ fallback
+	if position then
+		print("Using provided spawn position:", position)
+		originalRescueModel:PivotTo(CFrame.new(position))
 	else
-		print("No spawn location found, using default position")
+		-- Fallback: หา SpawnRescue หรือใกล้ผู้เล่น
+		local spawnRescue = workspace:FindFirstChild("SpawnRescue")
+		if spawnRescue then
+			print("Found SpawnRescue, pivoting to:", spawnRescue.CFrame.Position)
+			originalRescueModel:PivotTo(spawnRescue.CFrame)
+		elseif player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+			print("No SpawnRescue found, spawning near player")
+			originalRescueModel:PivotTo(CFrame.new(player.Character.HumanoidRootPart.Position + Vector3.new(10, 5, 0)))
+		else
+			print("No spawn location found, using default position")
+		end
 	end
 
 	playerOriginalRescue[player] = originalRescueModel

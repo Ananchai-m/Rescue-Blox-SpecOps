@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local MapSelectionSystem = require(ReplicatedStorage.Modules.MapSelectionSystem)
 local WaitingSystem = {}
 
 -- ตัวแปรสำหรับติดตาม
@@ -141,18 +142,33 @@ function WaitingSystem.startGame()
 	-- เริ่มนับถอยหลัง
 	spawn(function()
 		startCountdown()
-		isGamePlaying = true
-		print("Game starting now!")
+
+		print("Starting map selection...")
+		-- เริ่มระบบเลือก Map
+		local playersArray = {}
+		for _, player in ipairs(waitingPlayers) do
+			table.insert(playersArray, player)
+		end
+
 		-- ล้างรายการผู้เล่นที่รอ
 		waitingPlayers = {}
+
+		-- เริ่ม Map Selection (จะใช้เวลา ~18 วินาที: 15s voting + 3s result)
+		MapSelectionSystem.startVoting(playersArray)
+
+		-- รอให้ Map Selection เสร็จ
+		wait(19) -- buffer เพิ่มอีกนิด
+
+		-- ตั้งสถานะเกมเป็นกำลังเล่น
+		isGamePlaying = true
 		updateWaitingMessage()
-		-- ที่นี่สามารถเพิ่มโค้ดสำหรับเริ่มเกมได้
-		-- เช่น teleport ผู้เล่น, เปิด UI เกม, ฯลฯ
+
+		print("Map selection completed - Game starting now!")
 	end)
 end
 
-function WaitingSystem.stopGame() 
-	isGamePlaying = false 
+function WaitingSystem.stopGame()
+	isGamePlaying = false
 	updateWaitingMessage()
 	print("Game stopped")
 end
@@ -160,6 +176,7 @@ end
 -- ฟังก์ชันรีเซ็ตระบบ
 function WaitingSystem.reset()
 	waitingPlayers = {}
+	isGamePlaying = false
 	updateWaitingMessage()
 	print("WaitingSystem reset")
 end

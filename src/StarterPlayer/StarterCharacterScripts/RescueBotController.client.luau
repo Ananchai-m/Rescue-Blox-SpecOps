@@ -1206,15 +1206,21 @@ end
 
 -- Setup Simu Touched event สำหรับบังคับ Rescue Model แบบเดิม
 local simuDebounce = false
+local playerInGame = false -- ตัวแปรควบคุมว่าผู้เล่นคนนี้อยู่ในเกมหรือไม่
 local function setupSimuTouched()
 	-- Disconnect ถ้ามี connection เก่า
 	if connections.simuTouched then
 		connections.simuTouched:Disconnect()
 	end
-	
+
 	local simu = Workspace:FindFirstChild("Simu")
 	if simu and simu:IsA("BasePart") then
 		connections.simuTouched = simu.Touched:Connect(function(hit)
+			-- ตรวจสอบว่าผู้เล่นคนนี้อยู่ในเกมแล้วหรือยัง
+			if playerInGame then
+				return
+			end
+
 			if simuDebounce then return end
 
 			local humanoidHit = hit.Parent:FindFirstChildOfClass("Humanoid")
@@ -1226,11 +1232,27 @@ local function setupSimuTouched()
 				local gameReady = WaitingSystem.addWaitingPlayer(player)
 
 				if gameReady then
-					-- ครบจำนวนแล้ว เริ่มนับถอยหลัง แล้วจึงเริ่มเกม
-					print("Game ready - Starting countdown then original Rescue Mode")
-					-- รอให้ countdown เสร็จ แล้วจึงเริ่มเกม
+					-- ครบจำนวนแล้ว เริ่มนับถอยหลัง แล้วเริ่ม Map Selection แล้วเริ่มเกม
+					print("Game ready - Starting countdown then Map Selection then original Rescue Mode")
+
+					-- ตั้งสถานะว่าผู้เล่นคนนี้เข้าเกมแล้ว
+					playerInGame = true
+					print("Player entered game - Simu disabled for this player")
+
+					-- รอให้ countdown + Map Selection เสร็จ แล้วจึง freeze และเริ่มเกม
 					spawn(function()
-						wait(6) -- รอให้ countdown 5 วินาทีเสร็จ + buffer 1 วินาที
+						wait(23) -- รอให้ countdown 5s + Map Selection 15s + result 3s = 23s
+
+						-- Freeze ผู้เล่นหลังจาก Map Selection เสร็จ
+						if character and character:FindFirstChild("Humanoid") then
+							character.Humanoid.PlatformStand = true
+							if character.PrimaryPart then
+								character.PrimaryPart.Anchored = true
+							end
+							print("Player frozen after Map Selection - preparing to spawn rescue vehicle")
+						end
+
+						wait(2) -- buffer เพิ่มอีกนิด
 						startOriginalRescueMode() -- บังคับ Rescue Model แบบเดิม
 					end)
 				else
@@ -1249,6 +1271,12 @@ local function setupSimuTouched()
 	else
 		warn("Simu part not found in workspace")
 	end
+end
+
+-- ฟังก์ชันให้ผู้เล่นออกจากเกม
+local function exitGame()
+	playerInGame = false
+	print("Player exited game - Can touch Simu again")
 end
 
 function startOriginalRescueMode()
@@ -1271,14 +1299,36 @@ function startOriginalRescueMode()
 	isRescueMode = true
 	print("Set isRescueMode = true")
 
-	-- ส่งคำสั่ง spawn ไป server
-	local spawnPosition = nil
-	if character and character.PrimaryPart then
-		spawnPosition = character.PrimaryPart.Position
+	-- สุ่ม spawn point จาก workspace.SpawnRescues ก่อน
+	local finalSpawnPosition = nil
+	local spawnRescues = workspace:FindFirstChild("SpawnRescues")
+	if spawnRescues then
+		local spawnPoints = {}
+		for _, child in ipairs(spawnRescues:GetChildren()) do
+			if child:IsA("BasePart") then
+				table.insert(spawnPoints, child)
+			end
+		end
+
+		if #spawnPoints > 0 then
+			local randomSpawnPoint = spawnPoints[math.random(1, #spawnPoints)]
+			finalSpawnPosition = randomSpawnPoint.Position + Vector3.new(0, 5, 0) -- เว้นระยะจากพื้น
+			print("Selected random spawn point:", randomSpawnPoint.Name, "at position:", finalSpawnPosition)
+		else
+			warn("No spawn points found in SpawnRescues folder")
+		end
+	else
+		warn("SpawnRescues folder not found in workspace")
 	end
 
-	print("Requesting server to spawn original rescue model...")
-	spawnOriginalRescueEvent:FireServer(spawnPosition)
+	-- ถ้าไม่มี spawn point ให้ใช้ตำแหน่งผู้เล่นแทน
+	if not finalSpawnPosition and character and character.PrimaryPart then
+		finalSpawnPosition = character.PrimaryPart.Position
+		print("Using fallback player position:", finalSpawnPosition)
+	end
+
+	print("Requesting server to spawn original rescue model at position:", finalSpawnPosition)
+	spawnOriginalRescueEvent:FireServer(finalSpawnPosition)
 
 	-- รอให้ server สร้าง model
 	wait(0.5)
@@ -1294,16 +1344,23 @@ function startOriginalRescueMode()
 	if character and character.PrimaryPart and character:FindFirstChild("Humanoid") then
 		print("Setting up original Rescue Mode...")
 
-		-- Freeze player และปรับ camera
-		local simu = Workspace:FindFirstChild("Simu")
-		if simu and simu:IsA("BasePart") then
-			local simuPos = simu.Position + Vector3.new(0, simu.Size.Y/2 + 3, 0)
-			character:PivotTo(CFrame.new(simuPos))
-		end
+		-- ตรวจสอบว่าผู้เล่น freeze อยู่แล้วหรือยัง (จาก game ready)
+		-- ถ้ายัง ให้ freeze และย้ายไปที่ Simu
+		if not character.Humanoid.PlatformStand then
+			-- Freeze player และปรับ camera
+			local simu = Workspace:FindFirstChild("Simu")
+			if simu and simu:IsA("BasePart") then
+				local simuPos = simu.Position + Vector3.new(0, simu.Size.Y/2 + 3, 0)
+				character:PivotTo(CFrame.new(simuPos))
+			end
 
-		character.Humanoid.PlatformStand = true
-		if character.PrimaryPart then
-			character.PrimaryPart.Anchored = true
+			character.Humanoid.PlatformStand = true
+			if character.PrimaryPart then
+				character.PrimaryPart.Anchored = true
+			end
+			print("Player frozen at Simu location")
+		else
+			print("Player already frozen - skipping teleport to Simu")
 		end
 
 		-- ใช้กล้องแบบปกติแต่เปลี่ยน CameraSubject ให้ตามรถ
@@ -1377,7 +1434,14 @@ function stopOriginalRescueMode()
 	originalRescueModel = nil
 
 	isRescueMode = false
-	print("Exited from original Rescue Model")
+
+	-- ให้ผู้เล่นคนนี้สามารถเข้าเกมใหม่ได้
+	exitGame()
+
+	-- รีเซ็ต WaitingSystem
+	WaitingSystem.stopGame()
+
+	print("Exited from original Rescue Model - Ready for new game")
 
 	-- กลับไปควบคุม companion อัตโนมัติ - ลบของเก่าแล้ว spawn ใหม่
 	if rescueModel then
