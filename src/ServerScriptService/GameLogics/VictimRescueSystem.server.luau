@@ -6,8 +6,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 
--- Import GameConfig
+-- Import GameConfig and GameSummary
 local GameConfig = require(ReplicatedStorage.Modules.GameConfig)
+local GameSummary = require(ReplicatedStorage.Modules.GameSummary)
 local rescueSettings = GameConfig.getRescueSettings()
 
 -- Note: GameTimer is client-side, so we'll communicate via RemoteEvents
@@ -45,6 +46,10 @@ local function handleVictimRescue(player, victim)
 		playerRescueCount[player] = 0
 	end
 	playerRescueCount[player] = playerRescueCount[player] + 1
+
+	-- Update GameSummary stats
+	GameSummary.addVictimRescue(player)
+	GameSummary.addCoins(player, 1)
 
 	-- Fire client coin effect directly (no 3D coin)
 	rescueRemote:FireClient(player, "coinCollected", 1)

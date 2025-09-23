@@ -10,6 +10,7 @@ local GameTimer = {}
 -- ตัวแปรสำหรับ timer
 local timerGui = nil
 local timerConnection = nil
+local timerThread = nil
 local player = Players.LocalPlayer
 
 -- ฟังก์ชันสร้าง Timer GUI
@@ -24,6 +25,12 @@ function GameTimer.createTimerGui()
 	if timerConnection then
 		timerConnection:Disconnect()
 		timerConnection = nil
+	end
+
+	-- หยุด timer thread เก่าถ้ามี
+	if timerThread then
+		task.cancel(timerThread)
+		timerThread = nil
 	end
 
 	-- สร้าง ScreenGui
@@ -150,10 +157,13 @@ function GameTimer.startCountdown(duration)
 		if timeLeft < 0 then
 			timerLabel.Text = "00:00"
 			timerLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
-			if timerConnection then
-				timerConnection:Disconnect()
-				timerConnection = nil
+
+			-- หยุด timer thread
+			if timerThread then
+				task.cancel(timerThread)
+				timerThread = nil
 			end
+
 			print("Game timer finished!")
 
 			-- เรียก callback function ถ้ามี
@@ -164,7 +174,7 @@ function GameTimer.startCountdown(duration)
 	end
 
 	-- เริ่ม timer
-	timerConnection = task.spawn(function()
+	timerThread = task.spawn(function()
 		while timeLeft >= 0 and timerGui and timerGui.Parent do
 			updateTimer()
 			task.wait(1)
@@ -181,6 +191,11 @@ function GameTimer.stopTimer()
 		timerConnection = nil
 	end
 
+	if timerThread then
+		task.cancel(timerThread)
+		timerThread = nil
+	end
+
 	if timerGui then
 		timerGui:Destroy()
 		timerGui = nil
@@ -191,7 +206,7 @@ end
 
 -- ฟังก์ชันตรวจสอบสถานะ timer
 function GameTimer.isTimerActive()
-	return timerConnection ~= nil
+	return timerThread ~= nil
 end
 
 -- ฟังก์ชัน callback เมื่อ timer จบ (สามารถ override ได้)

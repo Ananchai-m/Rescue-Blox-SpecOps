@@ -42,9 +42,10 @@ local spawnAssignmentRemote = getOrCreateRemote("SpawnAssignment")
 local victimsReadyRemote = getOrCreateRemote("VictimsReady")
 local CompanionFollower = require(script.Parent:WaitForChild("CompanionFollower"))
 
--- Import VictimSpawner and GameConfig
+-- Import VictimSpawner, GameConfig, and GameSummary
 local VictimSpawner = require(ReplicatedStorage.Modules.VictimSpawner)
 local GameConfig = require(ReplicatedStorage.Modules.GameConfig)
+local GameSummary = require(ReplicatedStorage.Modules.GameSummary)
 
 -- เก็บข้อมูลรถของแต่ละผู้เล่น
 local playerVehicles = {}
@@ -899,8 +900,24 @@ local function startGame()
 		print("Game ended - clearing all victims...")
 		VictimSpawner.clearAllVictims()
 
+		-- แสดงสรุปผลเกม
+		print("Showing game summary...")
+		GameSummary.printStats() -- Debug stats
+		task.wait(2) -- รอให้ effects ต่างๆ เสร็จ
+
+		-- Set callback สำหรับเมื่อผู้เล่นปิด summary
+		GameSummary.onSummaryClosed = function(player)
+			GameSummary.resetToLobby(player)
+		end
+
+		GameSummary.showSummaryToAll()
+
 		print("Server: Game ended - accepting new players")
 		waitingSystemRemote:FireAllClients("gameEnded")
+
+		-- รีเซ็ต GameSummary สำหรับเกมถัดไป
+		task.wait(10) -- รอให้ผู้เล่นดู summary
+		GameSummary.reset()
 	end)
 end
 

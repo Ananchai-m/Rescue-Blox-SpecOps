@@ -229,6 +229,24 @@ local function stopRescueMode()
 	print("Stopped controlling RescueCompanion")
 end
 
+-- ฟังก์ชันล้าง GUI ต่างๆ ของเกม
+local function cleanupGameGUIs()
+	-- ลบ flip GUI
+	if flipSurfaceGui then
+		flipSurfaceGui:Destroy()
+		flipSurfaceGui = nil
+	end
+
+	-- ลบ Timer GUI (จะถูกทำการล้างใน GameSummary.resetToLobby แล้ว แต่เผื่อไว้)
+	local playerGui = player:WaitForChild("PlayerGui")
+	local timerGui = playerGui:FindFirstChild("GameTimerGui")
+	if timerGui then
+		timerGui:Destroy()
+	end
+
+	print("Game GUIs cleaned up")
+end
+
 character:WaitForChild("Humanoid").Seated:Connect(function(active, seatPart)
 	-- ตัดการเชื่อมต่อเก่าเสมอ
 	if seatPart and rescueModel and seatPart:IsDescendantOf(rescueModel) then
@@ -575,6 +593,7 @@ end
 -- Setup Simu Touched event สำหรับบังคับ Rescue Model แบบเดิม
 local simuDebounce = false
 local playerInGame = false -- ตัวแปรควบคุมว่าผู้เล่นคนนี้อยู่ในเกมหรือไม่
+local isInOriginalRescueMode = false -- ตัวแปรควบคุมว่าผู้เล่นอยู่ใน Original Rescue Mode หรือไม่
 local function setupSimuTouched()
 	-- Disconnect ถ้ามี connection เก่า
 	if connections.simuTouched then
@@ -697,8 +716,13 @@ function startOriginalRescueMode()
 		-- สร้าง flip GUI สำหรับ original rescue
 		createFlipGui(originalRescueModel)
 
-		-- เริ่ม Game Timer (5 นาที)
-		GameTimer.startCountdown(300)
+		-- เริ่ม Game Timer (ใช้ GameConfig)
+		GameTimer.startCountdown(GameConfig.getGameDuration())
+
+		-- Set callback เมื่อ timer หมด
+		GameTimer.onTimerFinished = function()
+			print("Timer finished - waiting for game summary...")
+		end
 
 		connections.originalRescueControl = RunService.Heartbeat:Connect(function()
 			updateOriginalRescueControls() -- ส่ง input ไป server
@@ -707,7 +731,8 @@ function startOriginalRescueMode()
 			-- กล้องจะตามรถอัตโนมัติผ่าน CameraSubject แล้ว ไม่ต้องปรับ manual
 		end)
 
-		print("Original Rescue Mode started successfully!")
+		isInOriginalRescueMode = true
+	print("Original Rescue Mode started successfully!")
 	else
 		print("Character not ready")
 	end
@@ -765,6 +790,7 @@ function stopOriginalRescueMode()
 
 	-- originalRescueModel ถูกล้างใน VehicleController แล้ว
 	isRescueMode = false
+	isInOriginalRescueMode = false
 
 	-- ให้ผู้เล่นคนนี้สามารถเข้าเกมใหม่ได้
 	exitGame()
@@ -985,6 +1011,28 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 			wait(2) -- buffer เพิ่มอีกนิด
 			startOriginalRescueMode() -- บังคับ Rescue Model แบบเดิม
 		end)
+	elseif action == "returnToLobby" then
+		print("Returning to lobby after game summary")
+
+		-- ล้างสถานะเกมทั้งหมด
+		playerInGame = false
+		isInOriginalRescueMode = false
+
+		-- ลบ GUI ต่างๆ
+		cleanupGameGUIs()
+
+		-- ลบ Original Rescue Model
+		local originalRescueModel = VehicleController.getOriginalRescueModel()
+		if originalRescueModel then
+			originalRescueModel:Destroy()
+			VehicleController.setOriginalRescueModel(nil)
+		end
+
+		-- Spawn companion หลังจาก reset เสร็จ
+		wait(0.5) -- รอให้ reset เสร็จก่อน
+		spawnRescueCompanion()
+		print("Successfully returned to lobby with new companion - ready for next game")
+
 	elseif action == "gameEnded" then
 		print("Game ended - can join new game")
 		-- รีเซ็ตสถานะ
