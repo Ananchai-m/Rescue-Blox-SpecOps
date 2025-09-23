@@ -39,6 +39,7 @@ local drillProgressRemote = getOrCreateRemote("HydraulicDrillProgress")
 local waitingSystemRemote = getOrCreateRemote("WaitingSystem")
 local mapVotingRemote = getOrCreateRemote("MapVoting")
 local spawnAssignmentRemote = getOrCreateRemote("SpawnAssignment")
+local victimsReadyRemote = getOrCreateRemote("VictimsReady")
 local CompanionFollower = require(script.Parent:WaitForChild("CompanionFollower"))
 
 -- Import VictimSpawner and GameConfig
@@ -874,6 +875,10 @@ local function startGame()
 	local victimsSpawned = VictimSpawner.spawnAllVictims()
 	if victimsSpawned then
 		print("Victims spawned successfully")
+		-- Signal to clients that victims are ready
+		task.wait(0.5) -- Small delay to ensure victims are fully loaded
+		victimsReadyRemote:FireAllClients()
+		print("Sent VictimsReady signal to all clients")
 	else
 		warn("Failed to spawn victims")
 	end

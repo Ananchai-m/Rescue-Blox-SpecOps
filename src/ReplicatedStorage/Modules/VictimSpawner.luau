@@ -27,6 +27,7 @@ local function getRandomPositionOnPart(part)
 	return worldPosition
 end
 
+
 -- ฟังก์ชันโคลน victim template
 local function cloneVictimTemplate()
 	local victimNPC = ServerStorage:FindFirstChild("VictimNPC")
@@ -90,6 +91,8 @@ local function spawnVictimAtPosition(position, spawnPointName)
 	-- ปรับตำแหน่งให้เท้าอยู่บนพื้นผิว
 	local adjustedPosition = position + Vector3.new(0, victimHeight, 0)
 	victim:PivotTo(CFrame.new(adjustedPosition))
+
+	-- ระบบ rescue ใช้ CustomRescueSystem แทน ProximityPrompt แล้ว
 
 	print("Spawned victim:", victim.Name, "at position:", adjustedPosition, "(height offset:", victimHeight, ")")
 	return victim

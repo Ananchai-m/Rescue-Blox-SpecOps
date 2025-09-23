@@ -115,7 +115,7 @@ local function createMapSelectionUI()
 
 		-- เพิ่ม Corner Radius
 		local corner = Instance.new("UICorner")
-		corner.CornerRadius = GameConfig.UI.cornerRadius
+		corner.CornerRadius = GameConfig.UI.mapSelectioCornerRadius
 		corner.Parent = mapFrame
 
 		-- Map Image
@@ -130,7 +130,7 @@ local function createMapSelectionUI()
 		
 		-- Corner สำหรับ Image
 		local imageCorner = Instance.new("UICorner")
-		imageCorner.CornerRadius = GameConfig.UI.smallCornerRadius
+		imageCorner.CornerRadius = GameConfig.UI.mapSelectioCornerRadius
 		imageCorner.Parent = mapImage
 
 		-- Map Name

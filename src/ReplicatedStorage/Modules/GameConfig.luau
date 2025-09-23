@@ -68,13 +68,22 @@ GameConfig.VICTIMS = {
 	maxVictims = 50
 }
 
+-- Rescue System Settings
+GameConfig.RESCUE = {
+	distance = 5, -- studs - how close to victim to show UI
+	holdDuration = 5, -- seconds - how long to hold E
+	keyCode = Enum.KeyCode.E, -- rescue key
+	serverValidationDistance = 50 -- studs - server allows more distance for lag
+}
+
 -- UI Settings
 GameConfig.UI = {
 	coinUIPosition = UDim2.new(0.02, 0, 0.05, 0), -- Scale-based positioning
 	coinUISize = UDim2.new(0.15, 0, 0.08, 0), -- Scale-based sizing
 	notificationDuration = 0.5,
 	cornerRadius = UDim.new(0.01, 0), -- Scale-based corner radius
-	smallCornerRadius = UDim.new(0.1, 0) -- Scale-based small corner radius
+	smallCornerRadius = UDim.new(0.1, 0), -- Scale-based small corner radius
+	mapSelectioCornerRadius = UDim.new(0.05, 0) 
 }
 
 -- Debug Settings
@@ -142,6 +151,10 @@ function GameConfig.removeMap(mapName)
 		end
 	end
 	return false
+end
+
+function GameConfig.getRescueSettings()
+	return GameConfig.RESCUE
 end
 
 -- Validation function
