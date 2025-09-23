@@ -70,9 +70,11 @@ GameConfig.VICTIMS = {
 
 -- UI Settings
 GameConfig.UI = {
-	coinUIPosition = UDim2.new(0, 20, 0, 20),
-	coinUISize = UDim2.new(0, 200, 0, 60),
-	notificationDuration = 0.5
+	coinUIPosition = UDim2.new(0.02, 0, 0.05, 0), -- Scale-based positioning
+	coinUISize = UDim2.new(0.15, 0, 0.08, 0), -- Scale-based sizing
+	notificationDuration = 0.5,
+	cornerRadius = UDim.new(0.01, 0), -- Scale-based corner radius
+	smallCornerRadius = UDim.new(0.1, 0) -- Scale-based small corner radius
 }
 
 -- Debug Settings

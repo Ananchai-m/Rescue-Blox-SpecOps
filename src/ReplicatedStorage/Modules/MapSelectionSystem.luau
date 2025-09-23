@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local GameConfig = require(ReplicatedStorage.Modules.GameConfig)
 
 local MapSelectionSystem = {}
 
@@ -114,14 +115,14 @@ local function createMapSelectionUI()
 
 		-- เพิ่ม Corner Radius
 		local corner = Instance.new("UICorner")
-		corner.CornerRadius = UDim.new(0, 10)
+		corner.CornerRadius = GameConfig.UI.cornerRadius
 		corner.Parent = mapFrame
 
 		-- Map Image
 		local mapImage = Instance.new("ImageLabel")
 		mapImage.Name = "MapImage"
-		mapImage.Size = UDim2.new(1, -20, 0.65, 0)
-		mapImage.Position = UDim2.new(0, 10, 0, 10)
+		mapImage.Size = UDim2.new(0.95, 0, 0.65, 0)
+		mapImage.Position = UDim2.new(0.025, 0, 0.05, 0)
 		mapImage.BackgroundColor3 = Color3.new(0.4, 0.4, 0.4)
 		mapImage.Image = map.image
 		mapImage.ScaleType = Enum.ScaleType.Crop
@@ -129,14 +130,14 @@ local function createMapSelectionUI()
 		
 		-- Corner สำหรับ Image
 		local imageCorner = Instance.new("UICorner")
-		imageCorner.CornerRadius = UDim.new(0, 8)
+		imageCorner.CornerRadius = GameConfig.UI.smallCornerRadius
 		imageCorner.Parent = mapImage
 
 		-- Map Name
 		local mapName = Instance.new("TextLabel")
 		mapName.Name = "MapName"
-		mapName.Size = UDim2.new(1, -10, 0.15, 0)
-		mapName.Position = UDim2.new(0, 5, 0.68, 0)
+		mapName.Size = UDim2.new(0.95, 0, 0.15, 0)
+		mapName.Position = UDim2.new(0.025, 0, 0.68, 0)
 		mapName.BackgroundTransparency = 1
 		mapName.Text = map.name
 		mapName.TextColor3 = Color3.new(1, 1, 1)
@@ -149,8 +150,8 @@ local function createMapSelectionUI()
 		-- Vote Count
 		local voteCount = Instance.new("TextLabel")
 		voteCount.Name = "VoteCount"
-		voteCount.Size = UDim2.new(1, -10, 0.15, 0)
-		voteCount.Position = UDim2.new(0, 5, 0.83, 0)
+		voteCount.Size = UDim2.new(0.95, 0, 0.15, 0)
+		voteCount.Position = UDim2.new(0.025, 0, 0.83, 0)
 		voteCount.BackgroundTransparency = 1
 		voteCount.Text = "Votes: 0"
 		voteCount.TextColor3 = Color3.new(0.7, 0.7, 0.7)

@@ -2,6 +2,8 @@
 -- จัดการระบบ timer สำหรับเกม
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local GameConfig = require(ReplicatedStorage.Modules.GameConfig)
 
 local GameTimer = {}
 
@@ -34,16 +36,22 @@ function GameTimer.createTimerGui()
 	-- สร้าง Frame หลัก
 	local mainFrame = Instance.new("Frame")
 	mainFrame.Name = "TimerFrame"
-	mainFrame.Size = UDim2.new(0.2, 0, 0.08, 0)
-	mainFrame.Position = UDim2.new(0.4, 0, 0.05, 0) -- อยู่ตรงกลางด้านบน
+	mainFrame.Size = UDim2.new(0.1, 0, 0.05, 0)
+	mainFrame.AnchorPoint = Vector2.new(0.5, 0)
+	mainFrame.Position = UDim2.new(0.5, 0, 0.05, 0) -- อยู่ตรงกลางด้านบน
 	mainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-	mainFrame.BackgroundTransparency = 0.3
+	mainFrame.BackgroundTransparency = 0.5
 	mainFrame.BorderSizePixel = 0
 	mainFrame.Parent = timerGui
 
+	local coinStroke = Instance.new("UIStroke")
+	coinStroke.Color = Color3.fromRGB(255, 255, 255)
+	coinStroke.Thickness = 2
+	coinStroke.Parent = mainFrame
+
 	-- สร้าง UICorner สำหรับ Frame
 	local frameCorner = Instance.new("UICorner")
-	frameCorner.CornerRadius = UDim.new(0, 8)
+	frameCorner.CornerRadius = GameConfig.UI.smallCornerRadius
 	frameCorner.Parent = mainFrame
 
 	-- สร้าง TextLabel สำหรับแสดงเวลา
@@ -58,15 +66,62 @@ function GameTimer.createTimerGui()
 	timerLabel.Font = Enum.Font.GothamBold
 	timerLabel.Parent = mainFrame
 
-	print("Game Timer GUI created")
-	return timerLabel
+	-- สร้าง Coin Frame ข้างๆ Timer
+	local coinFrame = Instance.new("Frame")
+	coinFrame.Name = "CoinFrame"
+	coinFrame.AnchorPoint = Vector2.new(0.5, 0)
+	coinFrame.Size = UDim2.new(0.15, 0, 0.05, 0)
+	coinFrame.Position = UDim2.new(0.63, 0, 0.05, 0) -- ข้างๆ TimerFrame
+	coinFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	coinFrame.BackgroundTransparency = 0.5
+	coinFrame.BorderSizePixel = 0
+	coinFrame.Parent = timerGui
+
+	-- สร้าง UICorner สำหรับ CoinFrame
+	local coinFrameCorner = Instance.new("UICorner")
+	coinFrameCorner.CornerRadius = GameConfig.UI.smallCornerRadius
+	coinFrameCorner.Parent = coinFrame
+
+	-- สร้าง UIStroke สำหรับ CoinFrame
+	local coinStroke = Instance.new("UIStroke")
+	coinStroke.Color = Color3.fromRGB(255, 215, 0)
+	coinStroke.Thickness = 2
+	coinStroke.Parent = coinFrame
+
+	-- สร้าง Coin Icon
+	local coinIcon = Instance.new("ImageLabel")
+	coinIcon.Name = "CoinIcon"
+	coinIcon.Size = UDim2.new(0.2, 0, 0.8, 0) -- Scale-based: 60% width, 80% height
+	coinIcon.Position = UDim2.new(0.05, 0, 0.1, 0) -- Scale-based: 5% from left, 10% from top
+	coinIcon.BackgroundTransparency = 1
+	coinIcon.Image = "rbxassetid://124358779164505"
+	coinIcon.ScaleType = Enum.ScaleType.Fit
+	coinIcon.Parent = coinFrame
+
+	-- สร้าง Coin Count Label
+	local coinLabel = Instance.new("TextLabel")
+	coinLabel.Name = "CoinLabel"
+	coinLabel.Size = UDim2.new(0.7, 0, 1, 0) -- Scale-based: 35% width, full height
+	coinLabel.Position = UDim2.new(0.3, 0, 0, 0) -- Scale-based: starts at 65% from left
+	coinLabel.BackgroundTransparency = 1
+	coinLabel.Text = "0"
+	coinLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+	coinLabel.TextScaled = true
+	coinLabel.Font = Enum.Font.GothamBold
+	coinLabel.TextStrokeTransparency = 0
+	coinLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	coinLabel.TextXAlignment = Enum.TextXAlignment.Center
+	coinLabel.Parent = coinFrame
+
+	print("Game Timer GUI with Coin UI created")
+	return timerLabel, coinLabel
 end
 
 -- ฟังก์ชันเริ่ม countdown
 function GameTimer.startCountdown(duration)
 	duration = duration or 300 -- default 5 minutes
 
-	local timerLabel = GameTimer.createTimerGui()
+	local timerLabel, coinLabel = GameTimer.createTimerGui()
 	if not timerLabel then
 		warn("Failed to create timer GUI")
 		return
@@ -141,5 +196,70 @@ end
 
 -- ฟังก์ชัน callback เมื่อ timer จบ (สามารถ override ได้)
 GameTimer.onTimerFinished = nil
+
+-- ฟังก์ชันอัปเดต coin count
+function GameTimer.updateCoinCount(count)
+	if timerGui then
+		local coinFrame = timerGui:FindFirstChild("CoinFrame")
+		if coinFrame then
+			local coinLabel = coinFrame:FindFirstChild("CoinLabel")
+			if coinLabel then
+				coinLabel.Text = tostring(count or 0)
+			end
+		end
+	end
+end
+
+-- ฟังก์ชันเพิ่ม coins พร้อม animation
+function GameTimer.addCoins(amount)
+	if timerGui then
+		local coinFrame = timerGui:FindFirstChild("CoinFrame")
+		if coinFrame then
+			local coinLabel = coinFrame:FindFirstChild("CoinLabel")
+			local coinIcon = coinFrame:FindFirstChild("CoinIcon")
+			if coinLabel and coinIcon then
+				local currentCount = tonumber(coinLabel.Text) or 0
+				local newCount = currentCount + amount
+				coinLabel.Text = tostring(newCount)
+
+				-- Animation สำหรับ coin icon
+				local TweenService = game:GetService("TweenService")
+				local pulseInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, true)
+				local pulseTween = TweenService:Create(coinIcon, pulseInfo, {
+					Size = UDim2.new(0.7, 0, 0.9, 0) -- Scale-based pulse: 70% width, 90% height
+				})
+				pulseTween:Play()
+
+				-- Text color flash
+				local flashInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+				local flashTween = TweenService:Create(coinLabel, flashInfo, {
+					TextColor3 = Color3.fromRGB(255, 255, 255)
+				})
+				flashTween:Play()
+
+				flashTween.Completed:Connect(function()
+					local returnTween = TweenService:Create(coinLabel, flashInfo, {
+						TextColor3 = Color3.fromRGB(255, 215, 0)
+					})
+					returnTween:Play()
+				end)
+			end
+		end
+	end
+end
+
+-- ฟังก์ชันดู coin count ปัจจุบัน
+function GameTimer.getCoinCount()
+	if timerGui then
+		local coinFrame = timerGui:FindFirstChild("CoinFrame")
+		if coinFrame then
+			local coinLabel = coinFrame:FindFirstChild("CoinLabel")
+			if coinLabel then
+				return tonumber(coinLabel.Text) or 0
+			end
+		end
+	end
+	return 0
+end
 
 return GameTimer
