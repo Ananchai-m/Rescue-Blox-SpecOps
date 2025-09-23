@@ -90,12 +90,11 @@ local function scanForHumanoids()
 	end
 	humanoidHighlights = {}
 
-	-- สแกนหา Humanoid ทั้งหมดใน workspace
-	for _, obj in pairs(workspace:GetChildren()) do
+	-- สแกนหา Humanoid ทั้งหมดใน workspace (รวม VictimFolders)
+	for _, obj in pairs(workspace:GetDescendants()) do
 		if obj:IsA("Model") and obj:FindFirstChildOfClass("Humanoid") then
 			local humanoid = obj:FindFirstChildOfClass("Humanoid")
-			-- ตรวจสอบว่าเป็น character จริง
-			if humanoid and obj:FindFirstChild("Head") and (obj:FindFirstChild("Torso") or obj:FindFirstChild("UpperTorso")) then
+			if humanoid and humanoid.Health > 0 then
 				local highlight = createHumanoidHighlight(obj)
 				humanoidHighlights[obj] = highlight
 				print("CameraSystem: Detected humanoid:", obj.Name)
