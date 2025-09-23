@@ -40,6 +40,7 @@ local waitingSystemRemote = getOrCreateRemote("WaitingSystem")
 local mapVotingRemote = getOrCreateRemote("MapVoting")
 local spawnAssignmentRemote = getOrCreateRemote("SpawnAssignment")
 local victimsReadyRemote = getOrCreateRemote("VictimsReady")
+local gameTimerRemote = getOrCreateRemote("GameTimer")
 local CompanionFollower = require(script.Parent:WaitForChild("CompanionFollower"))
 
 -- Import VictimSpawner, GameConfig, and GameSummary
@@ -54,7 +55,8 @@ local playerDrillStates = {}
 local playerOriginalRescue = {}
 local playerDrillTargets = {}
 local originalRescueConnections = {}
-local drillDebounce = {} -- ป้องกันการคลิกเร็วเกินไป
+local drillDebounce = {}
+local companionFollowers = {}
 
 -- Server-side Waiting System variables
 local waitingPlayers = {}
@@ -71,7 +73,12 @@ end
 
 -- ฟังก์ชันควบคุมรถ
 local function updateVehicleControl(player, vehicle, throttleInput, steerInput)
-	if not vehicle or not vehicle.PrimaryPart then return end
+	if not vehicle or not vehicle.PrimaryPart then
+		if throttleInput ~= 0 or steerInput ~= 0 then
+			-- updateVehicleControl failed - no vehicle or PrimaryPart
+		end
+		return
+	end
 
 	-- หา vehicle parts
 	local primary = vehicle.PrimaryPart
@@ -83,14 +90,24 @@ local function updateVehicleControl(player, vehicle, throttleInput, steerInput)
 	local wheelFL = vehicle:FindFirstChild("Wheel_FL")
 	local wheelFR = vehicle:FindFirstChild("Wheel_FR")
 
-	if not (wheelBL and wheelBR) then return end
+	if not (wheelBL and wheelBR) then
+		if throttleInput ~= 0 or steerInput ~= 0 then
+			-- Missing back wheels
+		end
+		return
+	end
 
 	local cylindricalBL = wheelBL:FindFirstChildOfClass("CylindricalConstraint")
 	local cylindricalBR = wheelBR:FindFirstChildOfClass("CylindricalConstraint")
 	local cylindricalFL = wheelFL and wheelFL:FindFirstChildOfClass("CylindricalConstraint")
 	local cylindricalFR = wheelFR and wheelFR:FindFirstChildOfClass("CylindricalConstraint")
 
-	if not (cylindricalBL and cylindricalBR) then return end
+	if not (cylindricalBL and cylindricalBR) then
+		if throttleInput ~= 0 or steerInput ~= 0 then
+			-- Missing cylindrical constraints
+		end
+		return
+	end
 
 	-- Set network ownership (skip while anchored to avoid errors)
 	if primary.Anchored then
@@ -140,6 +157,12 @@ local function updateVehicleControl(player, vehicle, throttleInput, steerInput)
 
 	-- Throttle
 	local dir = sign(throttleInput)
+
+	-- Debug torque application
+	if throttleInput ~= 0 or steerInput ~= 0 then
+		-- Applying vehicle controls
+	end
+
 	if dir == 0 then
 		-- หยุดรถทันทีด้วยแรงเบรก
 		local brakeTorque = 20000 -- แรงเบรกสูงเพื่อหยุดทันที
@@ -192,6 +215,20 @@ end
 spawnCompanionEvent.OnServerEvent:Connect(function(player, position, orientation)
 	if playerVehicles[player] then
 		playerVehicles[player]:Destroy()
+		playerVehicles[player] = nil
+	end
+
+	-- ล้าง vehicle connections เก่า
+	local connectionKey = tostring(player.UserId)
+	if vehicleConnections[connectionKey] then
+		vehicleConnections[connectionKey]:Disconnect()
+		vehicleConnections[connectionKey] = nil
+	end
+
+	-- หยุด companion follower เก่า
+	if companionFollowers[player] then
+		companionFollowers[player].running = false
+		companionFollowers[player] = nil
 	end
 
 	local rescueTemplate = ReplicatedStorage:FindFirstChild("RescueCompanion")
@@ -225,21 +262,8 @@ spawnCompanionEvent.OnServerEvent:Connect(function(player, position, orientation
 	-- ใช้ PivotTo เพื่อตั้งตำแหน่งหลังจากใส่ใน workspace แล้ว
 	companion:PivotTo(CFrame.new(spawnPosition, spawnPosition + spawnLook))
 
-	CompanionFollower.start(companion)
-
-	local vehicleSeat = companion:FindFirstChildWhichIsA("VehicleSeat", true)
-	if vehicleSeat then
-		vehicleSeat:GetPropertyChangedSignal("Occupant"):Connect(function()
-			local occupant = vehicleSeat.Occupant
-			if occupant then
-				task.defer(function()
-					if vehicleSeat.Occupant == occupant then
-						occupant.Sit = false
-					end
-				end)
-			end
-		end)
-	end
+	local follower = CompanionFollower.start(companion)
+	companionFollowers[player] = follower
 
 	playerVehicles[player] = companion
 	print("Spawned companion for", player.Name)
@@ -690,6 +714,13 @@ spawnOriginalRescueEvent.OnServerEvent:Connect(function(player, position)
 		playerOriginalRescue[player] = nil
 	end
 
+	-- ล้าง original rescue connections เก่า
+	local connectionKey = tostring(player.UserId)
+	if originalRescueConnections[connectionKey] then
+		originalRescueConnections[connectionKey]:Disconnect()
+		originalRescueConnections[connectionKey] = nil
+	end
+
 	-- หา Rescue template
 	local rescueTemplate = ReplicatedStorage:FindFirstChild("Rescue")
 	if not rescueTemplate or not rescueTemplate:IsA("Model") then
@@ -734,7 +765,12 @@ end)
 -- Control Original Rescue
 controlOriginalRescueEvent.OnServerEvent:Connect(function(player, throttleInput, steerInput)
 	local vehicle = playerOriginalRescue[player]
-	if not vehicle then return end
+	if not vehicle then
+		-- No original rescue vehicle found
+		return
+	end
+
+	-- Controls received from client
 
 	-- เก็บ input ล่าสุด
 	vehicle:SetAttribute("ThrottleInput", throttleInput)
@@ -742,13 +778,31 @@ controlOriginalRescueEvent.OnServerEvent:Connect(function(player, throttleInput,
 
 	-- เริ่ม/อัพเดท connection สำหรับ original rescue
 	local connectionKey = "original_" .. tostring(player.UserId)
-	if originalRescueConnections[connectionKey] then
-		return -- connection มีอยู่แล้ว
-	end
 
+	-- ลบ connection เก่าก่อน (กรณีที่ vehicle เปลี่ยนแปลง)
+	if originalRescueConnections[connectionKey] then
+		originalRescueConnections[connectionKey]:Disconnect()
+		originalRescueConnections[connectionKey] = nil
+	end
 	originalRescueConnections[connectionKey] = RunService.Heartbeat:Connect(function()
+		-- ตรวจสอบว่า vehicle ยังมีอยู่หรือไม่
+		if not vehicle or not vehicle.Parent then
+			-- Vehicle destroyed, disconnecting heartbeat
+			if originalRescueConnections[connectionKey] then
+				originalRescueConnections[connectionKey]:Disconnect()
+				originalRescueConnections[connectionKey] = nil
+			end
+			return
+		end
+
 		local currentThrottle = vehicle:GetAttribute("ThrottleInput") or 0
 		local currentSteer = vehicle:GetAttribute("SteerInput") or 0
+
+		-- Debug heartbeat - only when there's input
+		if currentThrottle ~= 0 or currentSteer ~= 0 then
+			-- Heartbeat updating vehicle controls
+		end
+
 		updateVehicleControl(player, vehicle, currentThrottle, currentSteer)
 	end)
 end)
@@ -781,6 +835,12 @@ Players.PlayerRemoving:Connect(function(player)
 	if playerOriginalRescue[player] then
 		playerOriginalRescue[player]:Destroy()
 		playerOriginalRescue[player] = nil
+	end
+
+	-- หยุด companion follower
+	if companionFollowers[player] then
+		companionFollowers[player].running = false
+		companionFollowers[player] = nil
 	end
 
 	local connectionKey = tostring(player.UserId)
@@ -888,38 +948,52 @@ local function startGame()
 	-- แจ้ง clients ให้เริ่มเกม
 	waitingSystemRemote:FireAllClients("startGame", playersArray)
 
+	-- เริ่มต้น GameSummary สำหรับผู้เล่นทุกคน
+	GameSummary.initializeAllPlayers()
+
 	-- ล้างรายการผู้เล่นที่รอ
 	waitingPlayers = {}
 
-	-- รอให้เกมจบ (จำลอง - ในอนาคตอาจมี actual game end logic)
-	spawn(function()
-		wait(GameConfig.getGameDuration())
-		isGamePlaying = false
-
-		-- ลบ victims เมื่อเกมจบ
-		print("Game ended - clearing all victims...")
-		VictimSpawner.clearAllVictims()
-
-		-- แสดงสรุปผลเกม
-		print("Showing game summary...")
-		GameSummary.printStats() -- Debug stats
-		task.wait(2) -- รอให้ effects ต่างๆ เสร็จ
-
-		-- Set callback สำหรับเมื่อผู้เล่นปิด summary
-		GameSummary.onSummaryClosed = function(player)
-			GameSummary.resetToLobby(player)
-		end
-
-		GameSummary.showSummaryToAll()
-
-		print("Server: Game ended - accepting new players")
-		waitingSystemRemote:FireAllClients("gameEnded")
-
-		-- รีเซ็ต GameSummary สำหรับเกมถัดไป
-		task.wait(10) -- รอให้ผู้เล่นดู summary
-		GameSummary.reset()
-	end)
+	-- Game จะจบเมื่อ client ส่งสัญญาณ timer หมด (ไม่ใช้ server timer แล้ว)
 end
+
+-- ฟังก์ชันจบเกม (เรียกเมื่อได้รับสัญญาณจาก client)
+local function endGame()
+	if not isGamePlaying then return end -- ป้องกันการเรียกซ้ำ
+
+	isGamePlaying = false
+
+	-- ลบ victims เมื่อเกมจบ
+	print("Game ended - clearing all victims...")
+	VictimSpawner.clearAllVictims()
+
+	-- แสดงสรุปผลเกม
+	print("Showing game summary...")
+	GameSummary.printStats() -- Debug stats
+	task.wait(2) -- รอให้ effects ต่างๆ เสร็จ
+
+	-- Set callback สำหรับเมื่อผู้เล่นปิด summary
+	GameSummary.onSummaryClosed = function(player)
+		GameSummary.resetToLobby(player)
+	end
+
+	GameSummary.showSummaryToAll()
+
+	print("Server: Game ended - accepting new players")
+	waitingSystemRemote:FireAllClients("gameEnded")
+
+	-- รีเซ็ต GameSummary สำหรับเกมถัดไป
+	task.wait(10) -- รอให้ผู้เล่นดู summary
+	GameSummary.reset()
+end
+
+-- ฟัง event จาก client เมื่อ timer หมด
+gameTimerRemote.OnServerEvent:Connect(function(player, action)
+	if action == "timerFinished" then
+		print("Received timer finished signal from", player.Name)
+		endGame()
+	end
+end)
 
 local function addWaitingPlayer(player)
 	-- ตรวจสอบว่าผู้เล่นอยู่ในรายการแล้วหรือไม่

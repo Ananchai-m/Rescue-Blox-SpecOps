@@ -6,17 +6,17 @@ CompanionFollower.__index = CompanionFollower
 
 local SMALL_NUMBER = 1e-4
 
-local KEEP_SURFACE = 3
+local KEEP_SURFACE = 5
 local SLOW_BAND = 8
-local RETARGET_EPS = 0.6
+local RETARGET_EPS = 0.3
 local MIN_WS, MAX_WS = 8, 16
-local TICK = 0.05
+local TICK = 0.03
 
 local AGENT_RADIUS = 3
 local AGENT_HEIGHT = 4
 local WAYPOINT_REACH = 3.5
 local REPATH_DIST = 6
-local REPATH_COOLDOWN = 0.4
+local REPATH_COOLDOWN = 0.2
 
 local SLOPE_ENTER_DEG = 20
 local SLOPE_EXIT_DEG = 10
@@ -325,10 +325,8 @@ function CompanionFollower:run()
 			targetPos = groundGoal
 		end
 
-		if (not self.lastGoal) or (targetPos - self.lastGoal).Magnitude > RETARGET_EPS then
-			humanoid:MoveTo(targetPos)
-			self.lastGoal = targetPos
-		end
+		local moveDir = (targetPos - myRoot.Position).Unit
+		humanoid:Move(moveDir)
 
 		if self.climb.active then
 			local lookFlat = horizontalUnit((myRoot.CFrame.LookVector * flat))

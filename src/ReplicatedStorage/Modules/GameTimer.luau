@@ -136,33 +136,31 @@ function GameTimer.startCountdown(duration)
 
 	local timeLeft = duration
 
-	-- ฟังก์ชันอัปเดตเวลา
-	local function updateTimer()
-		local minutes = math.floor(timeLeft / 60)
-		local seconds = timeLeft % 60
-		timerLabel.Text = string.format("%02d:%02d", minutes, seconds)
+	-- เริ่ม timer
+	timerThread = task.spawn(function()
+		while timeLeft > 0 and timerGui and timerGui.Parent do
+			-- อัปเดตการแสดงผล
+			local minutes = math.floor(timeLeft / 60)
+			local seconds = timeLeft % 60
+			timerLabel.Text = string.format("%02d:%02d", minutes, seconds)
 
-		-- เปลี่ยนสีเมื่อเวลาเหลือน้อย
-		if timeLeft <= 60 then
-			timerLabel.TextColor3 = Color3.fromRGB(255, 100, 100) -- แดง
-		elseif timeLeft <= 120 then
-			timerLabel.TextColor3 = Color3.fromRGB(255, 255, 100) -- เหลือง
-		else
-			timerLabel.TextColor3 = Color3.fromRGB(255, 255, 255) -- ขาว
+			-- เปลี่ยนสีเมื่อเวลาเหลือน้อย
+			if timeLeft <= 60 then
+				timerLabel.TextColor3 = Color3.fromRGB(255, 100, 100) -- แดง
+			elseif timeLeft <= 120 then
+				timerLabel.TextColor3 = Color3.fromRGB(255, 255, 100) -- เหลือง
+			else
+				timerLabel.TextColor3 = Color3.fromRGB(255, 255, 255) -- ขาว
+			end
+
+			timeLeft = timeLeft - 1
+			task.wait(1)
 		end
 
-		timeLeft = timeLeft - 1
-
 		-- เมื่อหมดเวลา
-		if timeLeft < 0 then
+		if timerGui and timerGui.Parent then
 			timerLabel.Text = "00:00"
 			timerLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
-
-			-- หยุด timer thread
-			if timerThread then
-				task.cancel(timerThread)
-				timerThread = nil
-			end
 
 			print("Game timer finished!")
 
@@ -171,14 +169,8 @@ function GameTimer.startCountdown(duration)
 				GameTimer.onTimerFinished()
 			end
 		end
-	end
 
-	-- เริ่ม timer
-	timerThread = task.spawn(function()
-		while timeLeft >= 0 and timerGui and timerGui.Parent do
-			updateTimer()
-			task.wait(1)
-		end
+		timerThread = nil -- ล้าง reference
 	end)
 
 	print("Game Timer started - " .. duration .. " seconds countdown")

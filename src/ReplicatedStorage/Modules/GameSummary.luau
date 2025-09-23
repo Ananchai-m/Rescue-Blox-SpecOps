@@ -43,6 +43,16 @@ function GameSummary.addCoins(player, amount)
 	playerStats[player.UserId].coins = playerStats[player.UserId].coins + (amount or 1)
 end
 
+-- ฟังก์ชันเพิ่มผู้เล่นทุกคนเข้าสู่ summary (เรียกเมื่อเกมเริ่ม)
+function GameSummary.initializeAllPlayers()
+	for _, player in ipairs(Players:GetPlayers()) do
+		if not playerStats[player.UserId] then
+			GameSummary.addPlayerScore(player, 0, 0)
+			print("[GameSummary] Initialized player", player.Name, "with 0 score")
+		end
+	end
+end
+
 -- ฟังก์ชันเรียงลำดับผู้เล่น
 function GameSummary.getSortedPlayers()
 	local sortedPlayers = {}
@@ -174,8 +184,8 @@ function GameSummary.createSummaryUI(player)
 	closeCorner.CornerRadius = GameConfig.UI.smallCornerRadius
 	closeCorner.Parent = closeButton
 
-	-- Close Button Click
-	closeButton.MouseButton1Click:Connect(function()
+	-- ฟังก์ชันปิด Summary (ใช้ร่วมกันระหว่าง manual click และ auto-close)
+	local function closeSummary()
 		local backgroundCloseTween = TweenService:Create(background,
 			TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 			{BackgroundTransparency = 1}
@@ -197,6 +207,49 @@ function GameSummary.createSummaryUI(player)
 				GameSummary.onSummaryClosed(player)
 			end
 		end)
+	end
+
+	-- Auto-close timer (10 วินาที) พร้อม countdown
+	local autoCloseTimer = nil
+	local countdownTimer = nil
+	local timeLeft = 10
+
+	local function startAutoCloseTimer()
+		-- Countdown display
+		countdownTimer = task.spawn(function()
+			while timeLeft > 0 and summaryGui and summaryGui.Parent do
+				closeButton.Text = "OK (" .. timeLeft .. ")"
+				task.wait(1)
+				timeLeft = timeLeft - 1
+			end
+		end)
+
+		-- Auto-close after 10 seconds
+		autoCloseTimer = task.spawn(function()
+			task.wait(10)
+			if summaryGui and summaryGui.Parent then -- ตรวจสอบว่ายังไม่ถูกปิด
+				print("[GameSummary] Auto-closing summary for", player.Name, "after 10 seconds")
+				closeSummary()
+			end
+		end)
+	end
+
+	-- เริ่ม auto-close timer
+	startAutoCloseTimer()
+
+	-- Close Button Click
+	closeButton.MouseButton1Click:Connect(function()
+		-- ยกเลิก auto-close timer เมื่อผู้เล่นกด OK เอง
+		if autoCloseTimer then
+			task.cancel(autoCloseTimer)
+			autoCloseTimer = nil
+		end
+		if countdownTimer then
+			task.cancel(countdownTimer)
+			countdownTimer = nil
+		end
+		print("[GameSummary] Manual close by", player.Name)
+		closeSummary()
 	end)
 
 	return summaryGui, scrollFrame

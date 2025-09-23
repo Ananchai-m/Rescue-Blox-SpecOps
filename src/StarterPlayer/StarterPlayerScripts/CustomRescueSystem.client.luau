@@ -159,7 +159,7 @@ local function findNearestVictim()
 	-- Check VictimFolders
 	local victimFolder = workspace:FindFirstChild("VictimFolders")
 	if not victimFolder then
-		print("[CustomRescueSystem] VictimFolders not found in workspace")
+		-- VictimFolders ไม่อยู่ (อาจจะเกมจบแล้ว) ไม่ต้องแสดง warning
 		return nil
 	end
 
@@ -427,7 +427,7 @@ local function initializeSystem()
 		end
 		print("[CustomRescueSystem] Found", victimCount, "victims in VictimFolders")
 	else
-		print("[CustomRescueSystem] VictimFolders not found during initialization")
+		-- VictimFolders ไม่อยู่ตอน initialization (ปกติถ้าเกมยังไม่เริ่ม)
 	end
 
 	-- Stop existing connections
@@ -489,6 +489,18 @@ victimsReadyRemote.OnClientEvent:Connect(function()
 	if player.Character then
 		task.wait(1) -- Wait for character to be ready
 		initializeSystem()
+	end
+end)
+
+-- Listen for game end and return to lobby signals to stop system
+local waitingSystemRemote = remoteEvents:WaitForChild("WaitingSystem")
+waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
+	if action == "returnToLobby" then
+		print("[CustomRescueSystem] Stopping system due to return to lobby")
+		stopRescue()
+	elseif action == "gameEnded" then
+		print("[CustomRescueSystem] Stopping system due to game ended")
+		stopRescue()
 	end
 end)
 

@@ -173,7 +173,8 @@ local function updateFlipGui()
 			print("Flip GUI DISABLED - Vehicle OK")
 		end
 	else
-		print("FlipSurfaceGui is nil!")
+		-- FlipSurfaceGui ถูกล้างแล้ว ไม่ต้องแสดง warning
+		return
 	end
 end
 
@@ -190,8 +191,12 @@ end
 local function updateOriginalRescueControls()
 	local originalRescueModel = VehicleController.getOriginalRescueModel()
 	if not originalRescueModel then return end
+
+	local throttle = VehicleController.getThrottleInput()
+	local steer = VehicleController.getSteerInput()
+
 	-- ส่งข้อมูลไปยัง server สำหรับ original rescue control
-	controlOriginalRescueEvent:FireServer(VehicleController.getThrottleInput(), VehicleController.getSteerInput())
+	controlOriginalRescueEvent:FireServer(throttle, steer)
 end
 
 local function stopRescueMode()
@@ -531,15 +536,6 @@ function startRescueMode(useCamera)
 		if not rescueModel then return end
 	end
 	
-	-- หา VehicleSeat ใน RescueCompanion
-	local vehicleSeat = rescueModel:FindFirstChild("VehicleSeat") or rescueModel:FindFirstChildOfClass("VehicleSeat")
-	if not vehicleSeat then
-		warn("VehicleSeat not found in RescueCompanion")
-		rescueModel:Destroy()
-		rescueModel = nil
-		return
-	end
-	
 	isRescueMode = true
 	
 	-- หยุดการตามผู้เล่น
@@ -656,8 +652,7 @@ function startOriginalRescueMode()
 	end
 
 	-- Set flag ทันทีเพื่อป้องกันการเรียกซ้ำ
-	isRescueMode = true
-	print("Set isRescueMode = true")
+	isInOriginalRescueMode = true
 
 	-- ใช้ SpawnPointManager เพื่อขอ spawn point จาก server
 	local finalSpawnPosition = SpawnPointManager.getSpawnPoint(5) -- timeout 5 วินาที
@@ -678,7 +673,7 @@ function startOriginalRescueMode()
 	local originalRescueModel = workspace:FindFirstChild(player.Name .. "_Rescue")
 	if not originalRescueModel then
 		warn("Original Rescue Model not found after server spawn")
-		isRescueMode = false
+		isInOriginalRescueMode = false
 		return
 	end
 
@@ -721,7 +716,18 @@ function startOriginalRescueMode()
 
 		-- Set callback เมื่อ timer หมด
 		GameTimer.onTimerFinished = function()
-			print("Timer finished - waiting for game summary...")
+			print("Timer finished - notifying server...")
+			-- ส่งสัญญาณไปยัง server เมื่อ timer หมดจริงๆ
+			local gameTimerRemote = remoteEvents:FindFirstChild("GameTimer")
+			if gameTimerRemote then
+				gameTimerRemote:FireServer("timerFinished")
+			end
+		end
+
+		-- ล้าง connection เก่าก่อนสร้างใหม่
+		if connections.originalRescueControl then
+			connections.originalRescueControl:Disconnect()
+			connections.originalRescueControl = nil
 		end
 
 		connections.originalRescueControl = RunService.Heartbeat:Connect(function()
@@ -732,7 +738,7 @@ function startOriginalRescueMode()
 		end)
 
 		isInOriginalRescueMode = true
-	print("Original Rescue Mode started successfully!")
+		print("Original Rescue Mode started successfully!")
 	else
 		print("Character not ready")
 	end
@@ -791,6 +797,7 @@ function stopOriginalRescueMode()
 	-- originalRescueModel ถูกล้างใน VehicleController แล้ว
 	isRescueMode = false
 	isInOriginalRescueMode = false
+	print("Reset isInOriginalRescueMode = false")
 
 	-- ให้ผู้เล่นคนนี้สามารถเข้าเกมใหม่ได้
 	exitGame()
@@ -856,8 +863,8 @@ connections.inputBegan = UserInputService.InputBegan:Connect(function(input, gam
 		end
 	end
 
-	-- Manual control inputs (เฉพาะเมื่ออยู่ใน Rescue Mode)
-	if isRescueMode then
+	-- Manual control inputs (เฉพาะเมื่ออยู่ใน Rescue Mode หรือ Original Rescue Mode)
+	if isRescueMode or isInOriginalRescueMode then
 		if input.KeyCode == Enum.KeyCode.W then
 			VehicleController.setThrottleInput(1)
 		elseif input.KeyCode == Enum.KeyCode.S then
@@ -870,6 +877,8 @@ connections.inputBegan = UserInputService.InputBegan:Connect(function(input, gam
 			-- กด SPACE เพื่อ flip รถเมื่อคว่ำ หรือดันรถถ้าแค่ติดอยู่
 			VehicleController.handleSpaceKey()
 		end
+	-- else
+		-- WASD input ignored when not in control mode
 	end
 end)
 
@@ -891,7 +900,7 @@ connections.inputChanged = UserInputService.InputChanged:Connect(function(input)
 end)
 
 connections.inputEnded = UserInputService.InputEnded:Connect(function(input, gameProcessed)
-	if not isRescueMode then return end
+	if not (isRescueMode or isInOriginalRescueMode) then return end
 
 	if input.KeyCode == Enum.KeyCode.W or input.KeyCode == Enum.KeyCode.S then
 		VehicleController.setThrottleInput(0)
@@ -1016,6 +1025,7 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 
 		-- ล้างสถานะเกมทั้งหมด
 		playerInGame = false
+		isRescueMode = false
 		isInOriginalRescueMode = false
 
 		-- ลบ GUI ต่างๆ
@@ -1028,9 +1038,34 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 			VehicleController.setOriginalRescueModel(nil)
 		end
 
+		-- รีเซ็ตกล้องกลับมาหาผู้เล่น
+		if character and character:FindFirstChild("Humanoid") then
+			camera.CameraType = Enum.CameraType.Custom
+			camera.CameraSubject = character.Humanoid
+
+			-- ปลดการ anchor character (กรณีที่ถูก anchor ไว้จากเกม)
+			if character.PrimaryPart then
+				character.PrimaryPart.Anchored = false
+			end
+
+			-- รีเซ็ต humanoid state
+			local humanoid = character.Humanoid
+			humanoid.PlatformStand = false
+			humanoid.Sit = false
+
+			print("Camera and character reset to normal state")
+		end
+
 		-- Spawn companion หลังจาก reset เสร็จ
 		wait(0.5) -- รอให้ reset เสร็จก่อน
 		spawnRescueCompanion()
+
+		-- เข้าโหมดควบคุม companion ทันที
+		wait(0.5) -- รอให้ companion spawn เสร็จ
+		if rescueModel then
+			startRescueMode(false) -- ไม่ใช้ camera tracking
+		end
+
 		print("Successfully returned to lobby with new companion - ready for next game")
 
 	elseif action == "gameEnded" then
