@@ -2,11 +2,11 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local MapSelectionSystem = require(ReplicatedStorage.Modules.MapSelectionSystem)
+local GameConfig = require(ReplicatedStorage.Modules.GameConfig)
 local WaitingSystem = {}
 
 -- ตัวแปรสำหรับติดตาม
 local waitingPlayers = {}
-local maxPlayers = 2
 local simuBillboard = nil
 local isCountingDown = false
 local isGamePlaying = false
@@ -56,13 +56,13 @@ local function updateWaitingMessage()
 	end
 
 	local waitingCount = #waitingPlayers
-	local remaining = maxPlayers - waitingCount
+	local remaining = GameConfig.getMaxPlayers() - waitingCount
 
 	if isGamePlaying then
 		simuBillboard.Text = "Game Playing!"
 		simuBillboard.Visible = true
 	elseif waitingCount > 0 and remaining > 0 then
-		simuBillboard.Text = string.format("Waiting for other players %d/%d คน", remaining, maxPlayers)
+		simuBillboard.Text = string.format("Waiting for other players %d/%d คน", remaining, GameConfig.getMaxPlayers())
 		simuBillboard.Visible = true
 	elseif waitingCount == 0 then 
 		simuBillboard.Text = "Please join the mission!"
@@ -90,7 +90,7 @@ function WaitingSystem.addWaitingPlayer(player)
 	updateWaitingMessage()
 
 	-- ตรวจสอบว่าครบจำนวนแล้วหรือไม่
-	if #waitingPlayers >= maxPlayers then
+	if #waitingPlayers >= GameConfig.getMaxPlayers() then
 		WaitingSystem.startGame()
 		return true
 	end
@@ -184,9 +184,9 @@ end
 -- ฟังก์ชันตั้งค่าจำนวนผู้เล่นสูงสุด
 function WaitingSystem.setMaxPlayers(count)
 	if count and count > 0 then
-		maxPlayers = count
+		GameConfig.setMaxPlayers(count)
 		updateWaitingMessage()
-		print("Max players set to: " .. maxPlayers)
+		print("Max players set to: " .. GameConfig.getMaxPlayers())
 	end
 end
 
@@ -197,7 +197,7 @@ end
 
 -- ฟังก์ชันดูจำนวนผู้เล่นสูงสุด
 function WaitingSystem.getMaxPlayers()
-	return maxPlayers
+	return GameConfig.getMaxPlayers()
 end
 
 -- ฟังก์ชันดูรายการผู้เล่นที่รออยู่

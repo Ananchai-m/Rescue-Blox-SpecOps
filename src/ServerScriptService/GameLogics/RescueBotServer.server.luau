@@ -41,8 +41,9 @@ local mapVotingRemote = getOrCreateRemote("MapVoting")
 local spawnAssignmentRemote = getOrCreateRemote("SpawnAssignment")
 local CompanionFollower = require(script.Parent:WaitForChild("CompanionFollower"))
 
--- Import VictimSpawner
+-- Import VictimSpawner and GameConfig
 local VictimSpawner = require(ReplicatedStorage.Modules.VictimSpawner)
+local GameConfig = require(ReplicatedStorage.Modules.GameConfig)
 
 -- เก็บข้อมูลรถของแต่ละผู้เล่น
 local playerVehicles = {}
@@ -55,7 +56,6 @@ local drillDebounce = {} -- ป้องกันการคลิกเร็�
 
 -- Server-side Waiting System variables
 local waitingPlayers = {}
-local maxPlayers = 2
 local isGamePlaying = false
 
 -- Server-side Map Voting variables
@@ -809,7 +809,7 @@ Players.PlayerRemoving:Connect(function(player)
 			table.remove(waitingPlayers, i)
 			print("Removed", player.Name, "from waiting list. Total waiting:", #waitingPlayers)
 			-- แจ้ง clients ทั้งหมด
-			waitingSystemRemote:FireAllClients("updateCount", #waitingPlayers, maxPlayers)
+			waitingSystemRemote:FireAllClients("updateCount", #waitingPlayers, GameConfig.getMaxPlayers())
 			break
 		end
 	end
@@ -878,6 +878,7 @@ local function startGame()
 		warn("Failed to spawn victims")
 	end
 
+
 	-- แจ้ง clients ให้เริ่มเกม
 	waitingSystemRemote:FireAllClients("startGame", playersArray)
 
@@ -886,7 +887,7 @@ local function startGame()
 
 	-- รอให้เกมจบ (จำลอง - ในอนาคตอาจมี actual game end logic)
 	spawn(function()
-		wait(300) -- 5 minutes
+		wait(GameConfig.getGameDuration())
 		isGamePlaying = false
 
 		-- ลบ victims เมื่อเกมจบ
@@ -916,10 +917,10 @@ local function addWaitingPlayer(player)
 	print(player.Name .. " added to server waiting list. Total waiting: " .. #waitingPlayers)
 
 	-- แจ้ง clients ทั้งหมด
-	waitingSystemRemote:FireAllClients("updateCount", #waitingPlayers, maxPlayers)
+	waitingSystemRemote:FireAllClients("updateCount", #waitingPlayers, GameConfig.getMaxPlayers())
 
 	-- ตรวจสอบว่าครบจำนวนแล้วหรือไม่
-	if #waitingPlayers >= maxPlayers then
+	if #waitingPlayers >= GameConfig.getMaxPlayers() then
 		startGame()
 		return true
 	end
@@ -938,7 +939,7 @@ waitingSystemRemote.OnServerEvent:Connect(function(player, action, ...)
 			if waitingPlayers[i] == player then
 				table.remove(waitingPlayers, i)
 				print("Removed", player.Name, "from waiting list. Total waiting:", #waitingPlayers)
-				waitingSystemRemote:FireAllClients("updateCount", #waitingPlayers, maxPlayers)
+				waitingSystemRemote:FireAllClients("updateCount", #waitingPlayers, GameConfig.getMaxPlayers())
 				break
 			end
 		end

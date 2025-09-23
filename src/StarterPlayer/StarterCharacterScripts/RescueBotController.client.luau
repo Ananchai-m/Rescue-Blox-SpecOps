@@ -15,6 +15,7 @@ local GameTimer = require(ReplicatedStorage.Modules.GameTimer)
 local SpawnPointManager = require(ReplicatedStorage.Modules.SpawnPointManager)
 local CameraSystem = require(ReplicatedStorage.Modules.CameraSystem)
 local VehicleController = require(ReplicatedStorage.Modules.VehicleController)
+local GameConfig = require(ReplicatedStorage.Modules.GameConfig)
 
 -- รอ RemoteEvents
 local remoteEvents = ReplicatedStorage:WaitForChild("RescueBotRemotes")
@@ -53,7 +54,6 @@ local flipSurfaceGui = nil
 
 -- Client-side waiting system variables
 local currentWaitingCount = 0
-local maxPlayersCount = 2
 
 -- ระบบ Rescue Mode แบบเดิม (จัดการโดย VehicleController แล้ว)
 
@@ -914,7 +914,6 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 	elseif action == "updateCount" then
 		local waitingCount, maxPlayers = ...
 		currentWaitingCount = waitingCount
-		maxPlayersCount = maxPlayers
 
 		-- อัปเดต billboard หรือ UI (ใช้ WaitingSystem ตรงๆ)
 		spawn(function()
@@ -926,9 +925,10 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 					if billboardGui and billboardGui:FindFirstChild("Frame") then
 						local textLabel = billboardGui.Frame:FindFirstChild("TextLabel")
 						if textLabel then
-							local remaining = maxPlayers - waitingCount
+							local maxPlayersFromConfig = GameConfig.getMaxPlayers()
+							local remaining = maxPlayersFromConfig - waitingCount
 							if waitingCount > 0 and remaining > 0 then
-								textLabel.Text = string.format("Waiting for other players %d/%d คน", remaining, maxPlayers)
+								textLabel.Text = string.format("Waiting for other players %d/%d คน", remaining, maxPlayersFromConfig)
 								textLabel.Visible = true
 							elseif waitingCount == 0 then
 								textLabel.Text = "Please join the mission!"
@@ -940,7 +940,7 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 			end)
 		end)
 
-		print("Waiting count updated:", waitingCount, "/", maxPlayers)
+		print("Waiting count updated:", waitingCount, "/", GameConfig.getMaxPlayers())
 	elseif action == "startGame" then
 		local playersArray = ...
 		print("Server started game with players:", table.concat(playersArray, ", "))
