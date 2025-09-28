@@ -36,8 +36,54 @@ local MAX_PITCH = math.rad(180)
 local MOUSE_SENSITIVITY = math.rad(0.3)
 local originalMouseBehavior = nil
 local originalMouseIconEnabled = nil
+local zoomGui = nil
+local zoomLabel = nil
 
 -- ===== CAMERA ZOOM FUNCTIONS =====
+
+local function ensureZoomGui()
+	local playerGui = player:FindFirstChildOfClass("PlayerGui")
+	if not playerGui then return end
+
+	if zoomGui and zoomGui.Parent ~= playerGui then
+		zoomGui:Destroy()
+		zoomGui = nil
+		zoomLabel = nil
+	end
+
+	if zoomGui and zoomGui.Parent then
+		return
+	end
+
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "CameraStatusGui"
+	screenGui.IgnoreGuiInset = true
+	screenGui.ResetOnSpawn = false
+	screenGui.Parent = playerGui
+	zoomGui = screenGui
+
+	local label = Instance.new("TextLabel")
+	label.Name = "ZoomLabel"
+	label.Size = UDim2.new(0.085, 0, 0.039, 0)
+	label.Position = UDim2.new(0.903, 0, 0.937, 0)
+	label.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+	label.BackgroundTransparency = 0.2
+	label.TextColor3 = Color3.new(1, 1, 1)
+	label.TextScaled = true
+	label.Font = Enum.Font.GothamBold
+	label.Text = "ZOOM 1.0X"
+	label.Parent = screenGui
+	zoomLabel = label
+end
+
+local function updateZoomLabel()
+	if not isZoomMode then return end
+	ensureZoomGui()
+	if not zoomLabel then return end
+	local zoomFactor = cameraZoomLevels[zoomIndex] or 1
+	zoomLabel.Text = string.format("ZOOM %.1fX", zoomFactor)
+	zoomLabel.Visible = true
+end
 
 local function applyCameraZoom()
 	if not isZoomMode or not originalFieldOfView then return end
@@ -46,7 +92,8 @@ local function applyCameraZoom()
 		zoomFactor = 1
 	end
 	camera.FieldOfView = originalFieldOfView / zoomFactor
-	print(string.format("CameraSystem: Zoom set to %.1fx", zoomFactor))
+	print(string.format("CameraSystem: Zoom set to %.1fX", zoomFactor))
+	updateZoomLabel()
 end
 
 function CameraSystem.setCameraZoomIndex(newIndex)
@@ -279,6 +326,8 @@ function CameraSystem.startCameraTracking()
 	UserInputService.MouseIconEnabled = false
 	cameraYaw = 0
 	cameraPitch = 0
+	ensureZoomGui()
+	updateZoomLabel()
 
 	-- ตั้งกล้องเป็น Scriptable
 	camera.CameraType = Enum.CameraType.Scriptable
@@ -340,17 +389,22 @@ function CameraSystem.stopCameraTracking()
 	zoomIndex = 1
 	cameraYaw = 0
 	cameraPitch = 0
-		if originalMouseBehavior then
-			UserInputService.MouseBehavior = originalMouseBehavior
-			originalMouseBehavior = nil
-		else
-			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-		end
+	if originalMouseBehavior then
+		UserInputService.MouseBehavior = originalMouseBehavior
+		originalMouseBehavior = nil
+	else
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+	end
 	if originalMouseIconEnabled ~= nil then
 		UserInputService.MouseIconEnabled = originalMouseIconEnabled
 		originalMouseIconEnabled = nil
 	else
 		UserInputService.MouseIconEnabled = true
+	end
+	if zoomGui then
+		zoomGui:Destroy()
+		zoomGui = nil
+		zoomLabel = nil
 	end
 
 	isZoomMode = false
