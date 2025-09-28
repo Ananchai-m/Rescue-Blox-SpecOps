@@ -3,6 +3,7 @@
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local CameraSystem = {}
@@ -28,6 +29,13 @@ local originalFogEnd = nil
 local humanoidHighlights = {}
 local humanoidScanConnection = nil
 local THERMAL_DETECTION_RANGE = 10 -- studs
+local cameraYaw = 0
+local cameraPitch = 0
+local MAX_YAW = math.rad(180)
+local MAX_PITCH = math.rad(180)
+local MOUSE_SENSITIVITY = math.rad(0.3)
+local originalMouseBehavior = nil
+local originalMouseIconEnabled = nil
 
 -- ===== CAMERA ZOOM FUNCTIONS =====
 
@@ -78,6 +86,13 @@ local function createHumanoidHighlight(humanoidCharacter)
 	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 	highlight.Parent = humanoidCharacter
 	return highlight
+end
+
+local function applyMouseDelta(delta)
+	if typeof(delta) ~= "Vector2" then return end
+	if delta.Magnitude == 0 then return end
+	cameraYaw = math.clamp(cameraYaw - (delta.X * MOUSE_SENSITIVITY), -MAX_YAW, MAX_YAW)
+	cameraPitch = math.clamp(cameraPitch - (delta.Y * MOUSE_SENSITIVITY), -MAX_PITCH, MAX_PITCH)
 end
 
 local function scanForHumanoids()
@@ -258,18 +273,27 @@ function CameraSystem.startCameraTracking()
 		zoomIndex = 1
 	end
 
+	originalMouseBehavior = UserInputService.MouseBehavior
+	originalMouseIconEnabled = UserInputService.MouseIconEnabled
+	UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+	UserInputService.MouseIconEnabled = false
+	cameraYaw = 0
+	cameraPitch = 0
+
 	-- ตั้งกล้องเป็น Scriptable
 	camera.CameraType = Enum.CameraType.Scriptable
 	applyCameraZoom()
 
 	-- เริ่มติดตาม Camera part
-	cameraTrackConnection = RunService.Heartbeat:Connect(function()
+	cameraTrackConnection = RunService.RenderStepped:Connect(function()
 		if cameraPart.Parent then
-			-- ยื่นกล้องไปข้างหน้า 5 studs ในทิศทางแกน X ของ BasePart
-			local basePosition = cameraPart.Position
-			local rightVector = cameraPart.CFrame.RightVector
-			local cameraPosition = basePosition + (rightVector * 5)
-			camera.CFrame = CFrame.lookAt(cameraPosition, cameraPosition + rightVector)
+			applyMouseDelta(UserInputService:GetMouseDelta())
+			local baseCFrame = cameraPart.CFrame
+			local rotation = CFrame.Angles(0, cameraYaw, 0) * CFrame.Angles(cameraPitch, 0, 0)
+			local finalCFrame = baseCFrame * rotation
+			local lookDirection = finalCFrame.RightVector
+			local cameraPosition = finalCFrame.Position + (lookDirection * 5)
+			camera.CFrame = CFrame.lookAt(cameraPosition, cameraPosition + lookDirection)
 		else
 			-- ถ้า Camera part หายไป ให้หยุดติดตาม
 			CameraSystem.stopCameraTracking()
@@ -314,6 +338,20 @@ function CameraSystem.stopCameraTracking()
 	end
 	originalFieldOfView = nil
 	zoomIndex = 1
+	cameraYaw = 0
+	cameraPitch = 0
+		if originalMouseBehavior then
+			UserInputService.MouseBehavior = originalMouseBehavior
+			originalMouseBehavior = nil
+		else
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		end
+	if originalMouseIconEnabled ~= nil then
+		UserInputService.MouseIconEnabled = originalMouseIconEnabled
+		originalMouseIconEnabled = nil
+	else
+		UserInputService.MouseIconEnabled = true
+	end
 
 	isZoomMode = false
 	print("CameraSystem: Camera tracking stopped - back to normal view")
