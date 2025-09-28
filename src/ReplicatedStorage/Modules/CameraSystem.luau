@@ -27,6 +27,7 @@ local colorCorrection = nil
 local originalFogEnd = nil
 local humanoidHighlights = {}
 local humanoidScanConnection = nil
+local THERMAL_DETECTION_RANGE = 10 -- studs
 
 -- ===== CAMERA ZOOM FUNCTIONS =====
 
@@ -90,14 +91,29 @@ local function scanForHumanoids()
 	end
 	humanoidHighlights = {}
 
+	local detectionOrigin
+	if camera and camera.CFrame then
+		detectionOrigin = camera.CFrame.Position
+	end
+
+	if not detectionOrigin then
+		return
+	end
+
 	-- สแกนหา Humanoid ทั้งหมดใน workspace (รวม VictimFolders)
 	for _, obj in pairs(workspace:GetDescendants()) do
 		if obj:IsA("Model") and obj:FindFirstChildOfClass("Humanoid") then
 			local humanoid = obj:FindFirstChildOfClass("Humanoid")
 			if humanoid and humanoid.Health > 0 then
-				local highlight = createHumanoidHighlight(obj)
-				humanoidHighlights[obj] = highlight
-				print("CameraSystem: Detected humanoid:", obj.Name)
+				local rootPart = obj.PrimaryPart or obj:FindFirstChild("HumanoidRootPart")
+				if rootPart then
+					local distance = (rootPart.Position - detectionOrigin).Magnitude
+					if distance <= THERMAL_DETECTION_RANGE then
+						local highlight = createHumanoidHighlight(obj)
+						humanoidHighlights[obj] = highlight
+						print("CameraSystem: Detected humanoid:", obj.Name)
+					end
+				end
 			end
 		end
 	end
