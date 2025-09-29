@@ -335,24 +335,25 @@ local BASE_TORQUE = 12000
 local TORQUE_STEP = 18000
 local COMBO_TIMEOUT = 1.5
 
-local function findMotorInside(part)
+local function findWeldInside(part)
 	if not part then
 		return nil
 	end
 
-	local motor = part:FindFirstChildWhichIsA("Motor6D")
-	if motor then
-		return motor
+	local weld = part:FindFirstChildOfClass("WeldConstraint") or part:FindFirstChildOfClass("Weld") or part:FindFirstChildOfClass("ManualWeld")
+	if weld then
+		return weld
 	end
 
 	for _, descendant in ipairs(part:GetDescendants()) do
-		if descendant:IsA("Motor6D") then
+		if descendant:IsA("WeldConstraint") or descendant:IsA("Weld") or descendant:IsA("ManualWeld") then
 			return descendant
 		end
 	end
 
 	return nil
 end
+
 
 local function locateDrillTarget(state)
 	if not state then
@@ -366,26 +367,70 @@ local function locateDrillTarget(state)
 	end
 
 	local nearbyParts = workspace:GetPartBoundsInRadius(head.Position, DrillConfig.TARGET_RADIUS)
-	local best
-	local bestDistance = math.huge
+	local rootParts = {} -- เก็บ RootPart ที่เจอ
+
 	for _, candidate in ipairs(nearbyParts) do
 		local isOwn = state.model and state.model:IsAncestorOf(candidate)
-		if candidate ~= head and not isOwn and candidate:IsA("BasePart") then
-			local motor = findMotorInside(candidate)
-			if motor then
-				local distance = (candidate.Position - head.Position).Magnitude
-				if distance < bestDistance then
-					bestDistance = distance
-					best = {
-						part = candidate,
-						motor = motor,
-					}
+
+		-- ตรวจสอบว่าเป็นชิ้นส่วนร่างกายหรือไม่
+		local bodyParts = {
+			"LeftFoot", "LeftHand", "LeftLowerArm", "LeftLowerLeg", "LeftUpperArm", "LeftUpperLeg",
+			"LowerTorso", "RightFoot", "RightHand", "RightLowerArm", "RightLowerLeg",
+			"RightUpperArm", "RightUpperLeg", "UpperTorso", "Head", "HumanoidRootPart"
+		}
+		local isBodyPart = false
+		for _, bodyPartName in ipairs(bodyParts) do
+			if candidate.Name == bodyPartName then
+				isBodyPart = true
+				break
+			end
+		end
+
+		-- มองหา RootPart หรือ part ที่มี Weld เยอะๆ
+		if candidate ~= head and not isOwn and not isBodyPart and candidate:IsA("BasePart") then
+			-- หา welds ทั้งหมดใน part นี้
+			local welds = {}
+			for _, descendant in ipairs(candidate:GetDescendants()) do
+				if descendant:IsA("WeldConstraint") or descendant:IsA("Weld") or descendant:IsA("ManualWeld") then
+					table.insert(welds, descendant)
 				end
+			end
+
+			-- ถ้ามี weld ให้เก็บไว้ โดยให้ RootPart มีความสำคัญสูงสุด
+			if #welds > 0 then
+				local distance = (candidate.Position - head.Position).Magnitude
+				local priority = candidate.Name == "Root" and 1000 or #welds -- RootPart ได้ priority สูงสุด
+				table.insert(rootParts, {
+					part = candidate,
+					welds = welds,
+					distance = distance,
+					priority = priority
+				})
 			end
 		end
 	end
 
-	return best
+	-- เรียงตาม priority (RootPart ก่อน) แล้วถึงระยะใกล้
+	if #rootParts > 0 then
+		table.sort(rootParts, function(a, b)
+			if a.priority ~= b.priority then
+				return a.priority > b.priority
+			end
+			return a.distance < b.distance
+		end)
+
+		local selected = rootParts[1]
+		-- สุ่มเลือก weld ใน part นี้
+		local randomWeld = selected.welds[math.random(1, #selected.welds)]
+
+		return {
+			part = selected.part,
+			weld = randomWeld,
+			allWelds = selected.welds
+		}
+	end
+
+	return nil
 end
 
 local function resetDrillTarget(player)
@@ -412,7 +457,7 @@ local function updateDrillProgress(player, state)
 	if not current or current.part ~= detected.part then
 		current = {
 			part = detected.part,
-			motor = detected.motor,
+			weld = detected.weld,
 			clicks = 0,
 			required = DrillConfig.CLICKS_REQUIRED,
 		}
@@ -425,26 +470,111 @@ local function updateDrillProgress(player, state)
 			clicks = 0,
 		})
 	else
-		current.motor = current.motor or detected.motor
+		current.weld = current.weld or detected.weld
 	end
 
 	current.clicks += 1
 	local progress = math.clamp(current.clicks / current.required, 0, 1)
 
 	if progress >= 1 then
-		local motor = current.motor
-		if motor and motor.Parent then
+		-- เก็บข้อมูล part ที่จะ eject ก่อนทำลาย weld
+		local weld = current.weld
+		local partToEject = nil
+
+		if weld and weld.Parent then
+			print("DEBUG: Weld type:", weld.ClassName)
+			print("DEBUG: Weld.Part0:", weld.Part0 and weld.Part0.Name or "nil")
+			print("DEBUG: Weld.Part1:", weld.Part1 and weld.Part1.Name or "nil")
+
+			-- เก็บ Part1 ที่จะ eject ก่อนทำลาย weld
+			if weld.Part1 and weld.Part1.Name ~= "Root" then
+				partToEject = weld.Part1
+				print("DEBUG: Selected Part1 for ejection:", partToEject.Name)
+			elseif weld.Part0 and weld.Part0.Name ~= "Root" then
+				-- fallback case ถ้า structure ไม่เป็นไปตามคาด
+				partToEject = weld.Part0
+				print("DEBUG: Selected Part0 for ejection (fallback):", partToEject.Name)
+			else
+				print("DEBUG: No valid part to eject found")
+			end
+
+			-- ทำลาย weld หลังจากเก็บข้อมูลแล้ว
 			pcall(function()
-				motor:Destroy()
+				weld:Destroy()
+				print("DEBUG: Weld destroyed successfully")
 			end)
 		else
-			-- หากหา motor ไม่เจอแล้ว ให้ลองค้นหาอีกครั้งก่อนจบ
-			local freshMotor = findMotorInside(current.part)
-			if freshMotor then
+			-- หากหา weld ไม่เจอแล้ว ให้ลองค้นหาอีกครั้งก่อนจบ
+			local freshWeld = findWeldInside(current.part)
+			if freshWeld and freshWeld.Part1 and freshWeld.Part1.Name ~= "Root" then
+				partToEject = freshWeld.Part1
+				print("DEBUG: Found fresh weld, selected Part1:", partToEject.Name)
 				pcall(function()
-					freshMotor:Destroy()
+					freshWeld:Destroy()
 				end)
+			elseif freshWeld and freshWeld.Part0 and freshWeld.Part0.Name ~= "Root" then
+				partToEject = freshWeld.Part0
+				print("DEBUG: Found fresh weld, selected Part0:", partToEject.Name)
+				pcall(function()
+					freshWeld:Destroy()
+				end)
+			else
+				print("DEBUG: No fresh weld found or no valid parts")
 			end
+		end
+
+		if partToEject and partToEject.Parent then
+			print("Ejecting part:", partToEject.Name, "from drilling completion")
+
+			-- ยกเลิก anchoring และเพิ่มแรงผลัก
+			partToEject.Anchored = false
+
+			-- สร้าง BodyVelocity เพื่อให้ part กระเด็น
+			local bodyVelocity = Instance.new("BodyVelocity")
+			bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+
+			-- คำนวณทิศทางการกระเด็น (สุ่มทิศทางขึ้นและออกจากจุดศูนย์กลาง)
+			local randomDirection = Vector3.new(
+				math.random(-100, 100) / 100,  -- X: -1 ถึง 1
+				math.random(50, 150) / 100,    -- Y: 0.5 ถึง 1.5 (ขึ้นบน)
+				math.random(-100, 100) / 100   -- Z: -1 ถึง 1
+			).Unit
+
+			local ejectForce = 25 -- แรงกระเด็น
+			bodyVelocity.Velocity = randomDirection * ejectForce
+			bodyVelocity.Parent = partToEject
+
+			-- ลบ BodyVelocity หลังจาก 0.5 วินาที
+			spawn(function()
+				task.wait(0.5)
+				if bodyVelocity and bodyVelocity.Parent then
+					bodyVelocity:Destroy()
+				end
+			end)
+
+			-- เริ่ม fading effect สำหรับ part ที่หลุดด้วย Debris Service
+			local Debris = game:GetService("Debris")
+			local fadeTime = 2 -- เวลา fade ใน วินาที
+			spawn(function()
+				local originalTransparency = partToEject.Transparency
+				local steps = 20 -- จำนวนขั้นของการ fade
+				local stepTime = fadeTime / steps
+				local transparencyStep = (1 - originalTransparency) / steps
+
+				for i = 1, steps do
+					if partToEject and partToEject.Parent then
+						partToEject.Transparency = originalTransparency + (transparencyStep * i)
+						task.wait(stepTime)
+					else
+						break
+					end
+				end
+			end)
+
+			-- ใช้ Debris Service เพื่อลบ part หลังจาก fade time
+			Debris:AddItem(partToEject, fadeTime + 0.5) -- เพิ่มเวลาเล็กน้อยเพื่อให้ fade เสร็จก่อน
+		else
+			print("No part to eject - RootPart remains in place")
 		end
 		drillProgressRemote:FireClient(player, {
 			status = "complete",

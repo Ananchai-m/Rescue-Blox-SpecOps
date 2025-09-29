@@ -9,6 +9,7 @@ local DrillSystem = {}
 
 -- Private variables
 local drillingTargets = {} -- เก็บข้อมูลการเจาะแต่ละ part
+local recentlyCompleted = {} -- เก็บ part ที่เพิ่งเจาะเสร็จเพื่อหลีกเลี่ยง
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 
@@ -210,24 +211,39 @@ local function findDrillablePartsNearPosition(position, range)
 				ancestor = ancestor.Parent
 			end
 
+			-- ตรวจสอบว่าเป็นชิ้นส่วนร่างกายหรือไม่
+			local bodyParts = {
+				"LeftFoot", "LeftHand", "LeftLowerArm", "LeftLowerLeg", "LeftUpperArm", "LeftUpperLeg",
+				"LowerTorso", "RightFoot", "RightHand", "RightLowerArm", "RightLowerLeg",
+				"RightUpperArm", "RightUpperLeg", "UpperTorso", "Head", "HumanoidRootPart"
+			}
+			local isBodyPart = false
+			for _, bodyPartName in ipairs(bodyParts) do
+				if obj.Name == bodyPartName then
+					isBodyPart = true
+					break
+				end
+			end
+
 			-- ตรวจสอบระยะห่าง
 			local distance = (obj.Position - position).Magnitude
-			if distance <= range then
-				-- ตรวจสอบว่ามี Motor6D อยู่ข้างใน
-				local motor6d = obj:FindFirstChildOfClass("Motor6D")
-				if motor6d then
+			if distance <= range and not isBodyPart and not recentlyCompleted[obj] then
+				-- ตรวจสอบว่ามี Weld อยู่ข้างใน
+				local weld = obj:FindFirstChildOfClass("WeldConstraint") or obj:FindFirstChildOfClass("Weld") or obj:FindFirstChildOfClass("ManualWeld")
+
+				if weld then
 					if isDrillArm then
 						-- เก็บ DrillArm parts แยก
 						table.insert(drillArmParts, {
 							part = obj,
-							motor6d = motor6d,
+							weld = weld,
 							distance = distance
 						})
 					elseif not shouldIgnore then
 						-- เก็บ parts ปกติที่เจาะได้
 						table.insert(foundParts, {
 							part = obj,
-							motor6d = motor6d,
+							weld = weld,
 							distance = distance
 						})
 					end
@@ -271,20 +287,36 @@ local function checkDrillArmCollision()
 						end
 
 						if not isPartOfDrillArm then
-							-- ตรวจสอบการชนกัน (ใช้ Region3 หรือ distance)
-							local distance = (part.Position - drillArmPrimaryPart.Position).Magnitude
-							local combinedSize = (part.Size.Magnitude + drillArmPrimaryPart.Size.Magnitude) / 2
+							-- ตรวจสอบว่าเป็น body part หรือไม่
+							local bodyParts = {
+								"LeftFoot", "LeftHand", "LeftLowerArm", "LeftLowerLeg", "LeftUpperArm", "LeftUpperLeg",
+								"LowerTorso", "RightFoot", "RightHand", "RightLowerArm", "RightLowerLeg",
+								"RightUpperArm", "RightUpperLeg", "UpperTorso", "Head", "HumanoidRootPart"
+							}
+							local isBodyPart = false
+							for _, bodyPartName in ipairs(bodyParts) do
+								if part.Name == bodyPartName then
+									isBodyPart = true
+									break
+								end
+							end
 
-							if distance <= combinedSize then
-								-- ตรวจสอบว่ามี Motor6D
-								local motor6d = part:FindFirstChildOfClass("Motor6D")
-								if motor6d then
-									table.insert(drillableParts, {
-										part = part,
-										motor6d = motor6d,
-										distance = distance,
-										drillArmModel = obj
-									})
+							if not isBodyPart then
+								-- ตรวจสอบการชนกัน (ใช้ Region3 หรือ distance)
+								local distance = (part.Position - drillArmPrimaryPart.Position).Magnitude
+								local combinedSize = (part.Size.Magnitude + drillArmPrimaryPart.Size.Magnitude) / 2
+
+								if distance <= combinedSize then
+									-- ตรวจสอบว่ามี Weld
+									local weld = part:FindFirstChildOfClass("WeldConstraint") or part:FindFirstChildOfClass("Weld") or part:FindFirstChildOfClass("ManualWeld")
+									if weld then
+										table.insert(drillableParts, {
+											part = part,
+											weld = weld,
+											distance = distance,
+											drillArmModel = obj
+										})
+									end
 								end
 							end
 						end
@@ -312,18 +344,20 @@ end
 
 local function startDrilling(partData)
 	local part = partData.part
-	local motor6d = partData.motor6d
+	local weld = partData.weld
 	local partName = part.Name
 
 	-- เริ่ม tracking การเจาะ
 	if not drillingTargets[part] then
+		print("Starting new drilling session for:", partName)
 		drillingTargets[part] = {
 			clicks = 0,
-			motor6d = motor6d,
+			weld = weld,
 			partName = partName,
 			requiredClicks = DrillConfig.CLICKS_REQUIRED
 		}
 	else
+		print("Continuing drilling session for:", partName, "Current clicks:", drillingTargets[part].clicks)
 		-- อัปเดต requiredClicks ในกรณีที่ค่าเปลี่ยน
 		drillingTargets[part].requiredClicks = DrillConfig.CLICKS_REQUIRED
 	end
@@ -343,18 +377,21 @@ local function startDrilling(partData)
 
 	-- ถ้าเจาะครบแล้ว
 	if target.clicks >= target.requiredClicks then
-		-- ทำลาย Motor6D
-		if motor6d and motor6d.Parent then
-			motor6d:Destroy()
-			print("Motor6D destroyed for part:", partName)
-		end
-
-		-- อัพเดท payload
+		-- อัพเดท payload (ไม่ทำลาย Weld ที่ client ให้ server จัดการ)
 		payload.status = "complete"
 		payload.progress = 1
 
-		-- ล้างข้อมูลการเจาะ
+		-- ล้างข้อมูลการเจาะและเพิ่มเข้า recently completed
+		print("Clearing drilling data for completed part:", partName)
 		drillingTargets[part] = nil
+		recentlyCompleted[part] = true
+
+		-- ลบออกจาก recently completed หลัง 3 วินาที
+		spawn(function()
+			task.wait(3)
+			recentlyCompleted[part] = nil
+			print("Removed", partName, "from recently completed list")
+		end)
 	end
 
 	-- แสดง UI
@@ -367,14 +404,15 @@ end
 
 function DrillSystem.clearOldDrillingData()
 	drillingTargets = {}
-	print("Cleared old drilling data")
+	recentlyCompleted = {}
+	print("Cleared old drilling data and recently completed list")
 end
 
 function DrillSystem.handleDrillingClick(clickPosition)
 	-- ตรวจสอบการชนของ DrillArm.PrimaryPart ก่อน
 	local drillArmHit = checkDrillArmCollision()
 	if drillArmHit then
-		print("DrillArm.PrimaryPart hit part:", drillArmHit.part.Name, "with Motor6D:", drillArmHit.motor6d.Name)
+		print("DrillArm.PrimaryPart hit part:", drillArmHit.part.Name, "with Weld:", drillArmHit.weld.Name)
 
 		-- แสดง UI แบบข้อมูลเท่านั้น (ไม่เจาะ)
 		local payload = {
@@ -395,7 +433,7 @@ function DrillSystem.handleDrillingClick(clickPosition)
 		return true -- มี DrillArm ชน
 	end
 
-	-- หา BasePart ที่มี Motor6D ในระยะใกล้ (ปกติ)
+	-- หา BasePart ที่มี Weld ในระยะใกล้ (ปกติ)
 	local drillableParts, drillArmParts = findDrillablePartsNearPosition(clickPosition, DrillConfig.DETECTION_RANGE)
 
 	if #drillableParts > 0 then
