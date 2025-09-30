@@ -130,8 +130,13 @@ end
 
 -- เชื่อมต่อ DrillSystem กับ server remote
 connections.drillProgress = drillProgressRemote.OnClientEvent:Connect(function(payload)
-	-- ใช้ DrillSystem จัดการ UI แทน (ถ้าต้องการ)
-	-- DrillSystem จัดการ UI เอง แล้ว
+	-- ส่ง payload จาก server ให้ DrillSystem แสดง UI
+	if payload then
+		print("Client received drill progress:", payload.status, payload.partName, payload.clicks, "/", payload.requiredClicks)
+		DrillSystem.showDrillProgress(payload)
+	else
+		warn("Client received nil payload from server")
+	end
 end)
 
 

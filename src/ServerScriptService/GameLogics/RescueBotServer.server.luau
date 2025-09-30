@@ -526,13 +526,22 @@ local function updateDrillProgress(player, state)
 		if partToEject and partToEject.Parent then
 			print("Ejecting part:", partToEject.Name, "from drilling completion")
 
-			-- ยกเลิก anchoring และเพิ่มแรงผลัก
+			-- ยกเลิก anchoring และเปิด CanCollide
 			partToEject.Anchored = false
+			partToEject.CanCollide = true
 
-			-- สร้าง BodyVelocity เพื่อให้ part กระเด็น
-			local bodyVelocity = Instance.new("BodyVelocity")
-			bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+			-- ปรับให้มีมวลน้อย
+			pcall(function()
+				partToEject.CustomPhysicalProperties = PhysicalProperties.new(
+					0.3,  -- Density (มวลน้อยพอที่จะตกลงมา แต่ไม่หนักเกินไป)
+					0.5,  -- Friction (เพิ่มเพื่อไม่ให้ลื่นมาก)
+					0.2,  -- Elasticity (ลดเพื่อไม่ให้เด้งมาก)
+					1,    -- FrictionWeight
+					1     -- ElasticityWeight
+				)
+			end)
 
+			-- ใช้ AssemblyLinearVelocity แทน BodyVelocity เพื่อไม่ต่อต้านแรงโน้มถ่วง
 			-- คำนวณทิศทางการกระเด็น (สุ่มทิศทางขึ้นและออกจากจุดศูนย์กลาง)
 			local randomDirection = Vector3.new(
 				math.random(-100, 100) / 100,  -- X: -1 ถึง 1
@@ -541,38 +550,18 @@ local function updateDrillProgress(player, state)
 			).Unit
 
 			local ejectForce = 25 -- แรงกระเด็น
-			bodyVelocity.Velocity = randomDirection * ejectForce
-			bodyVelocity.Parent = partToEject
+			partToEject.AssemblyLinearVelocity = randomDirection * ejectForce
 
-			-- ลบ BodyVelocity หลังจาก 0.5 วินาที
-			spawn(function()
-				task.wait(0.5)
-				if bodyVelocity and bodyVelocity.Parent then
-					bodyVelocity:Destroy()
-				end
-			end)
+			-- ให้มีการหมุนสุ่มเล็กน้อย
+			partToEject.AssemblyAngularVelocity = Vector3.new(
+				math.random(-5, 5),
+				math.random(-5, 5),
+				math.random(-5, 5)
+			)
 
-			-- เริ่ม fading effect สำหรับ part ที่หลุดด้วย Debris Service
+			-- ใช้ Debris Service เพื่อลบ part หลังจาก 5 วินาที
 			local Debris = game:GetService("Debris")
-			local fadeTime = 2 -- เวลา fade ใน วินาที
-			spawn(function()
-				local originalTransparency = partToEject.Transparency
-				local steps = 20 -- จำนวนขั้นของการ fade
-				local stepTime = fadeTime / steps
-				local transparencyStep = (1 - originalTransparency) / steps
-
-				for i = 1, steps do
-					if partToEject and partToEject.Parent then
-						partToEject.Transparency = originalTransparency + (transparencyStep * i)
-						task.wait(stepTime)
-					else
-						break
-					end
-				end
-			end)
-
-			-- ใช้ Debris Service เพื่อลบ part หลังจาก fade time
-			Debris:AddItem(partToEject, fadeTime + 0.5) -- เพิ่มเวลาเล็กน้อยเพื่อให้ fade เสร็จก่อน
+			Debris:AddItem(partToEject, 5)
 		else
 			print("No part to eject - RootPart remains in place")
 		end

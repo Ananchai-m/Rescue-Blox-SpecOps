@@ -114,18 +114,22 @@ local function hideDrillProgress()
 end
 
 local function showDrillProgress(payload)
+	print("DrillSystem.showDrillProgress called with payload:", payload)
 	ensureDrillProgressGui()
 	if not drillContainer then
+		warn("DrillSystem: drillContainer is nil after ensureDrillProgressGui")
 		return
 	end
 
 	if payload.status == "cancel" then
+		print("DrillSystem: Hiding progress (cancel)")
 		hideDrillProgress()
 		return
 	end
 
 	cancelDrillHideThread()
 	drillContainer.Visible = true
+	print("DrillSystem: Container set to visible")
 
 	local partName = payload.partName or ""
 	local clicks = payload.clicks or 0
@@ -141,6 +145,8 @@ local function showDrillProgress(payload)
 		drillStatusLabel.Text = string.format("กำลังเจาะ... (%d/%d)", clicks, required)
 	end
 	drillProgressFill.Size = UDim2.new(progress, 0, 1, 0)
+
+	print(string.format("DrillSystem: Updated UI - %s (%d/%d) %.0f%%", partName, clicks, required, progress * 100))
 
 	if payload.status == "complete" then
 		drillHideThread = task.delay(DrillConfig.HIDE_DELAY, function()
@@ -457,6 +463,10 @@ end
 
 function DrillSystem.hideDrillProgress()
 	hideDrillProgress()
+end
+
+function DrillSystem.showDrillProgress(payload)
+	showDrillProgress(payload)
 end
 
 -- Character update handler
