@@ -36,6 +36,7 @@ local spawnOriginalRescueEvent = getOrCreateRemote("SpawnOriginalRescue")
 local controlOriginalRescueEvent = getOrCreateRemote("ControlOriginalRescue")
 local stopOriginalRescueEvent = getOrCreateRemote("StopOriginalRescue")
 local drillProgressRemote = getOrCreateRemote("HydraulicDrillProgress")
+local drillCompleteRemote = getOrCreateRemote("DrillComplete")
 local waitingSystemRemote = getOrCreateRemote("WaitingSystem")
 local mapVotingRemote = getOrCreateRemote("MapVoting")
 local spawnAssignmentRemote = getOrCreateRemote("SpawnAssignment")
@@ -47,6 +48,27 @@ local CompanionFollower = require(script.Parent:WaitForChild("CompanionFollower"
 local VictimSpawner = require(ReplicatedStorage.Modules.VictimSpawner)
 local GameConfig = require(ReplicatedStorage.Modules.GameConfig)
 local GameSummary = require(ReplicatedStorage.Modules.GameSummary)
+
+-- ปิดการนั่งใน VehicleSeat ทั้งหมด
+local function disableVehicleSeats()
+	for _, descendant in ipairs(workspace:GetDescendants()) do
+		if descendant:IsA("VehicleSeat") then
+			descendant.Disabled = true
+			print("Disabled VehicleSeat:", descendant:GetFullName())
+		end
+	end
+end
+
+-- เรียกใช้ตอนเริ่มเกม
+disableVehicleSeats()
+
+-- ตรวจสอบ VehicleSeat ใหม่ที่ถูกสร้างขึ้นมา
+workspace.DescendantAdded:Connect(function(descendant)
+	if descendant:IsA("VehicleSeat") then
+		descendant.Disabled = true
+		print("Auto-disabled new VehicleSeat:", descendant:GetFullName())
+	end
+end)
 
 -- เก็บข้อมูลรถของแต่ละผู้เล่น
 local playerVehicles = {}
@@ -994,6 +1016,172 @@ Players.PlayerRemoving:Connect(function(player)
 			break
 		end
 	end
+end)
+
+-- รับข้อมูลจาก Client เมื่อเจาะเสร็จ แล้วจัดการ physics ฝั่ง Server
+drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPartsData, rescuePosition, ejectStrength)
+	print("Server received drill complete from", player.Name, "for part:", partData.Name, "Strength:", ejectStrength or "normal")
+
+	-- หา part จริงใน workspace
+	local part = workspace:FindFirstChild(partData.Name, true)
+	if not part or not part:IsA("BasePart") and not part:IsA("MeshPart") then
+		warn("Part not found or invalid:", partData.Name)
+		return
+	end
+
+	-- Unanchor และเพิ่มแรงกระเด็นให้ part หลักและ connected parts
+	for _, partInfo in ipairs(connectedPartsData) do
+		local connectedPart = workspace:FindFirstChild(partInfo.Name, true)
+		if connectedPart and (connectedPart:IsA("BasePart") or connectedPart:IsA("MeshPart")) then
+			-- เจาะได้ทั้ง part ที่ Anchored และ Unanchored
+			-- Unanchor ถ้ายัง anchored อยู่
+			if connectedPart.Anchored then
+				connectedPart.Anchored = false
+			end
+			connectedPart.CanCollide = true
+
+			-- ตั้งค่า physics properties
+			local customProps = PhysicalProperties.new(
+				0.3,    -- Density
+				0.1,    -- Friction
+				0.7,    -- Elasticity
+				1.0,    -- FrictionWeight
+				1.0     -- ElasticityWeight
+			)
+			connectedPart.CustomPhysicalProperties = customProps
+
+			-- กระเด็นทุกครั้ง แต่ความแรงแตกต่างกัน
+			local isMainPart = (connectedPart == part)
+
+			-- กำหนดความแรงตาม ejectStrength
+			local velocityMultiplier
+			if ejectStrength == "strong" then
+				-- แรงมาก
+				velocityMultiplier = isMainPart and 300 or 150
+			else
+				-- แรงปานกลาง
+				velocityMultiplier = isMainPart and 150 or 80
+			end
+
+			-- คำนวณทิศทางกระเด็นออกจาก Rescue bot
+			local ejectDirection
+			if rescuePosition then
+				local awayDirection = (connectedPart.Position - rescuePosition).Unit
+				ejectDirection = Vector3.new(
+					awayDirection.X + math.random(-5, 5) / 10,
+					math.random(25, 50) / 10,  -- แรงขึ้นสูงมาก (2.5 - 5.0)
+					awayDirection.Z + math.random(-5, 5) / 10
+				).Unit
+			else
+				ejectDirection = Vector3.new(
+					math.random(-10, 10) / 10,
+					math.random(25, 50) / 10,  -- แรงขึ้นสูงมาก (2.5 - 5.0)
+					math.random(-10, 10) / 10
+				).Unit
+			end
+
+			-- ใช้ความแรงที่กำหนดไว้
+			connectedPart.AssemblyLinearVelocity = ejectDirection * velocityMultiplier
+
+			-- แรงหมุน (ปรับตาม strength)
+			local rotationMultiplier = (ejectStrength == "strong") and (isMainPart and 30 or 15) or (isMainPart and 20 or 10)
+			local randomRotation = Vector3.new(
+				math.random(-rotationMultiplier, rotationMultiplier),
+				math.random(-rotationMultiplier, rotationMultiplier),
+				math.random(-rotationMultiplier, rotationMultiplier)
+			)
+			connectedPart.AssemblyAngularVelocity = randomRotation
+
+			print("Server ejected:", connectedPart.Name, "IsMainPart:", isMainPart, "Strength:", ejectStrength or "normal", "Velocity:", velocityMultiplier)
+		end
+	end
+
+	-- เช็คว่ามี part อื่นๆ ที่ Anchored แต่ไม่มี part ล้อมรอบ ให้ unanchor ตัวเอง (เฉพาะบริเวณใกล้ๆ)
+	local function checkFloatingParts()
+		local buildingLV1 = workspace:FindFirstChild("Building_LV1")
+		local obstaclesFolder = buildingLV1 and buildingLV1:FindFirstChild("Obstacles") or workspace:FindFirstChild("Obstacles")
+
+		if not obstaclesFolder then return end
+
+		-- เช็คเฉพาะ parts ในรัศมี 20 studs จาก part ที่เจาะ เพื่อลดภาระ
+		local searchRadius = 20
+		local nearbyParts = workspace:GetPartBoundsInRadius(part.Position, searchRadius)
+
+		for _, nearbyPart in ipairs(nearbyParts) do
+			if (nearbyPart:IsA("BasePart") or nearbyPart:IsA("MeshPart")) and nearbyPart.Anchored then
+				-- เช็คว่าอยู่ใน Obstacles folder
+				local isInObstacles = false
+				local ancestor = nearbyPart.Parent
+				while ancestor and ancestor ~= workspace do
+					if ancestor == obstaclesFolder then
+						isInObstacles = true
+						break
+					end
+					ancestor = ancestor.Parent
+				end
+
+				if not isInObstacles then
+					continue -- ข้าม part ที่ไม่ได้อยู่ใน Obstacles
+				end
+				-- ยิง raycast 6 ทิศทาง เพื่อหา part ข้างๆ
+				local hasNeighbor = false
+				local directions = {
+					Vector3.new(0, 1, 0),   -- up
+					Vector3.new(0, -1, 0),  -- down
+					Vector3.new(0, 0, 1),   -- front
+					Vector3.new(0, 0, -1),  -- back
+					Vector3.new(1, 0, 0),   -- right
+					Vector3.new(-1, 0, 0)   -- left
+				}
+
+				local partSize = nearbyPart.Size
+				local rayDistance = math.max(partSize.X, partSize.Y, partSize.Z) * 0.6
+
+				local rayParams = RaycastParams.new()
+				rayParams.FilterDescendantsInstances = {nearbyPart}
+				rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+				for _, direction in ipairs(directions) do
+					local rayResult = workspace:Raycast(nearbyPart.Position, direction * rayDistance, rayParams)
+					if rayResult and rayResult.Instance then
+						local hitPart = rayResult.Instance
+						-- เช็คว่า hitPart อยู่ใน Obstacles และยัง Anchored
+						if hitPart:IsA("BasePart") or hitPart:IsA("MeshPart") then
+							local isInObstacles = false
+							local ancestor = hitPart.Parent
+							while ancestor and ancestor ~= workspace do
+								if ancestor == obstaclesFolder then
+									isInObstacles = true
+									break
+								end
+								ancestor = ancestor.Parent
+							end
+
+							if isInObstacles and hitPart.Anchored then
+								hasNeighbor = true
+								break
+							end
+						end
+					end
+				end
+
+				-- ถ้าไม่มีเพื่อนบ้าน ให้ unanchor
+				if not hasNeighbor then
+					print("Found floating part:", nearbyPart.Name, "- Unanchoring")
+					nearbyPart.Anchored = false
+					nearbyPart.CanCollide = true
+
+					-- ตั้งค่า physics properties
+					local customProps = PhysicalProperties.new(0.3, 0.1, 0.7, 1.0, 1.0)
+					nearbyPart.CustomPhysicalProperties = customProps
+				end
+			end
+		end
+	end
+
+	-- เช็ค floating parts หลังจากกระเด็นเสร็จ
+	task.wait(0.5)
+	checkFloatingParts()
 end)
 
 -- Server-side Waiting System functions
