@@ -52,6 +52,7 @@ local function createVictimBillboard(victim)
 	-- Create BillboardGui
 	victimBillboard = Instance.new("BillboardGui")
 	victimBillboard.Name = "RescueBillboard"
+	victimBillboard.AlwaysOnTop = true
 	victimBillboard.Size = UDim2.new(4, 0, 2, 0)
 	victimBillboard.StudsOffset = Vector3.new(0, 3, 0) -- แสดงเหนือหัว victim
 	victimBillboard.Adornee = rootPart
