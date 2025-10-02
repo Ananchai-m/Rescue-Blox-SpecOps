@@ -548,6 +548,13 @@ local function updateDrillProgress(player, state)
 		if partToEject and partToEject.Parent then
 			print("Ejecting part:", partToEject.Name, "from drilling completion")
 
+			-- Fire client to show coin effect when part breaks
+			local coinAmount = math.random(2, 4) -- Random 2-4 coins per drill
+			local drillCompleteRemote = remoteEventsFolder:FindFirstChild("DrillComplete")
+			if drillCompleteRemote then
+				drillCompleteRemote:FireClient(player, partToEject.Position, coinAmount)
+			end
+
 			-- ยกเลิก anchoring และเปิด CanCollide
 			partToEject.Anchored = false
 			partToEject.CanCollide = true

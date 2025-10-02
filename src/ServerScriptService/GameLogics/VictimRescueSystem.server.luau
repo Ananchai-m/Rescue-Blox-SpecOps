@@ -51,8 +51,9 @@ local function handleVictimRescue(player, victim)
 	GameSummary.addVictimRescue(player)
 	GameSummary.addCoins(player, 1)
 
-	-- Fire client coin effect directly (no 3D coin)
-	rescueRemote:FireClient(player, "coinCollected", 1)
+	-- Fire client to show coin animation effect (Candy Crush style)
+	local coinAmount = math.random(3, 6) -- Random 3-6 coins per rescue
+	rescueRemote:FireClient(player, "coinCollected", coinAmount, rootPart.Position)
 
 	-- Add victim fade out effect
 	local humanoid = victim:FindFirstChildOfClass("Humanoid")

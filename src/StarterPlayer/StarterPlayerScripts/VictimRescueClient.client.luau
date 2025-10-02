@@ -10,6 +10,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 -- Import modules
 local GameTimer = require(ReplicatedStorage.Modules.GameTimer)
+local CoinEffect = require(ReplicatedStorage.Modules.CoinEffect)
 
 -- Wait for RemoteEvents
 local remoteEvents = ReplicatedStorage:WaitForChild("RescueBotRemotes")
@@ -140,9 +141,13 @@ local function showRescueNotification(rescueCount)
 end
 
 -- Handle rescue events from server
-rescueRemote.OnClientEvent:Connect(function(action, data)
+rescueRemote.OnClientEvent:Connect(function(action, data, position)
 	if action == "coinCollected" then
-		createCoinUIEffect()
+		-- Use new CoinEffect system
+		local coinAmount = data or 1
+		local worldPosition = position or Vector3.new(0, 10, 0)
+
+		CoinEffect.SpawnCoins(worldPosition, coinAmount, player)
 		playRescueSound()
 	elseif action == "victimRescued" then
 		local rescueCount = data

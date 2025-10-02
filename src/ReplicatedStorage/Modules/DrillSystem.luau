@@ -4,6 +4,8 @@
 local DrillConfig = require(script.Parent.DrillConfig)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CoinEffect = require(script.Parent.CoinEffect)
 
 local DrillSystem = {}
 
@@ -713,6 +715,17 @@ player.CharacterAdded:Connect(function(newCharacter)
 	drillingTargets = {}
 	currentDrillingPart = nil
 	hideDrillProgress()
+end)
+
+-- Listen for drill complete events from server (for coin effects)
+local remoteEventsFolder = ReplicatedStorage:WaitForChild("RescueBotRemotes")
+local drillCompleteRemote = remoteEventsFolder:WaitForChild("DrillComplete")
+
+drillCompleteRemote.OnClientEvent:Connect(function(position, coinAmount)
+	-- Show coin effect when drilling is complete
+	if position and coinAmount then
+		CoinEffect.SpawnCoins(position, coinAmount, player)
+	end
 end)
 
 return DrillSystem

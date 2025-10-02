@@ -12,6 +12,43 @@ local timerGui = nil
 local timerConnection = nil
 local timerThread = nil
 local player = Players.LocalPlayer
+local emitterAttributeName = "CoinEffectOriginalEnabled"
+
+local function attachCoinEmitter(targetCoinFrame: Frame)
+	local effectsFolder = ReplicatedStorage:FindFirstChild("Effects")
+	if not effectsFolder then
+		warn("GameTimer: Effects folder not found in ReplicatedStorage")
+		return nil
+	end
+
+	local emitterTemplate = effectsFolder:FindFirstChild("Emitter")
+	if not emitterTemplate then
+		warn("GameTimer: Emitter template not found under ReplicatedStorage.Effects")
+		return nil
+	end
+
+	local emitterClone = emitterTemplate:Clone()
+	emitterClone.Name = emitterTemplate.Name
+	emitterClone.Parent = targetCoinFrame
+
+	emitterClone:SetAttribute(emitterAttributeName, false)
+
+	for _, descendant in emitterClone:GetDescendants() do
+		local success, currentEnabled = pcall(function()
+			return descendant.Enabled
+		end)
+		if success then
+			descendant:SetAttribute(emitterAttributeName, false)
+			if currentEnabled ~= false then
+				pcall(function()
+					descendant.Enabled = false
+				end)
+			end
+		end
+	end
+
+	return emitterClone
+end
 
 -- ฟังก์ชันสร้าง Timer GUI
 function GameTimer.createTimerGui()
@@ -94,6 +131,8 @@ function GameTimer.createTimerGui()
 	coinStroke.Color = Color3.fromRGB(255, 215, 0)
 	coinStroke.Thickness = 2
 	coinStroke.Parent = coinFrame
+
+	attachCoinEmitter(coinFrame)
 
 	-- สร้าง Coin Icon
 	local coinIcon = Instance.new("ImageLabel")
