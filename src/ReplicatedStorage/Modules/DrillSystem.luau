@@ -446,7 +446,8 @@ local function startDrilling(partData)
 				if (connectedPart:IsA("BasePart") or connectedPart:IsA("MeshPart")) then
 					table.insert(connectedPartsData, {
 						Name = connectedPart.Name,
-						Position = connectedPart.Position
+						Position = connectedPart.Position,
+						Instance = connectedPart
 					})
 				end
 			end
@@ -454,7 +455,8 @@ local function startDrilling(partData)
 			-- ส่งข้อมูลไป Server พร้อมข้อมูลความแรง
 			local partData = {
 				Name = part.Name,
-				Position = part.Position
+				Position = part.Position,
+				Instance = part
 			}
 			print("Sending", #connectedPartsData, "parts to server for physics simulation")
 			drillCompleteRemote:FireServer(partData, connectedPartsData, rescuePosition, ejectStrength)

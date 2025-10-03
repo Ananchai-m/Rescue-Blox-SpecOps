@@ -133,14 +133,7 @@ local function updateVehicleControl(player, vehicle, throttleInput, steerInput)
 
 	-- Set network ownership (skip while anchored to avoid errors)
 	if primary.Anchored then
-		pcall(function()
-			primary:SetNetworkOwner(nil)
-		end)
-		if wheelBL then pcall(function() wheelBL:SetNetworkOwner(nil) end) end
-		if wheelBR then pcall(function() wheelBR:SetNetworkOwner(nil) end) end
-		if wheelFL then pcall(function() wheelFL:SetNetworkOwner(nil) end) end
-		if wheelFR then pcall(function() wheelFR:SetNetworkOwner(nil) end) end
-
+		-- ไม่เรียก SetNetworkOwner เพราะ part ยัง anchored อยู่
 		local function brakeConstraint(constraint)
 			if not constraint then return end
 			constraint.AngularVelocity = 0
@@ -152,11 +145,22 @@ local function updateVehicleControl(player, vehicle, throttleInput, steerInput)
 		brakeConstraint(cylindricalFR)
 		return
 	else
-		primary:SetNetworkOwner(player)
-		if wheelBL then wheelBL:SetNetworkOwner(player) end
-		if wheelBR then wheelBR:SetNetworkOwner(player) end
-		if wheelFL then wheelFL:SetNetworkOwner(player) end
-		if wheelFR then wheelFR:SetNetworkOwner(player) end
+		-- ตั้ง network owner เฉพาะเมื่อ part ไม่ anchored
+		pcall(function()
+			primary:SetNetworkOwner(player)
+		end)
+		if wheelBL and not wheelBL.Anchored then
+			pcall(function() wheelBL:SetNetworkOwner(player) end)
+		end
+		if wheelBR and not wheelBR.Anchored then
+			pcall(function() wheelBR:SetNetworkOwner(player) end)
+		end
+		if wheelFL and not wheelFL.Anchored then
+			pcall(function() wheelFL:SetNetworkOwner(player) end)
+		end
+		if wheelFR and not wheelFR.Anchored then
+			pcall(function() wheelFR:SetNetworkOwner(player) end)
+		end
 	end
 
 	-- Steering
@@ -1026,19 +1030,122 @@ Players.PlayerRemoving:Connect(function(player)
 end)
 
 -- รับข้อมูลจาก Client เมื่อเจาะเสร็จ แล้วจัดการ physics ฝั่ง Server
+local function isBreakablePart(instance)
+	return instance:IsA("BasePart") or instance:IsA("MeshPart")
+end
+
+local LIGHT_DEBRIS_PROPERTIES = PhysicalProperties.new(
+	0.05,  -- Density: very light
+	0.05,  -- Friction: minimal drag when sliding
+	0.3,   -- Elasticity: small bounce to keep motion lively
+	0.5,   -- FrictionWeight
+	0.5    -- ElasticityWeight
+)
+
 drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPartsData, rescuePosition, ejectStrength)
 	print("Server received drill complete from", player.Name, "for part:", partData.Name, "Strength:", ejectStrength or "normal")
 
-	-- หา part จริงใน workspace
-	local part = workspace:FindFirstChild(partData.Name, true)
-	if not part or not part:IsA("BasePart") and not part:IsA("MeshPart") then
+	-- หา part จริงใน workspace (ใช้ instance จาก client ถ้ามี)
+	local part = nil
+	if partData.Instance and partData.Instance:IsA("BasePart") and partData.Instance:IsDescendantOf(workspace) then
+		part = partData.Instance
+	else
+		part = workspace:FindFirstChild(partData.Name, true)
+	end
+
+	if not part or (not part:IsA("BasePart") and not part:IsA("MeshPart")) then
 		warn("Part not found or invalid:", partData.Name)
 		return
 	end
 
+	local directChildren = {}
+	local parentContainer = part.Parent
+	for _, child in ipairs(part:GetChildren()) do
+		if isBreakablePart(child) and child.Name ~= "Root" then
+			table.insert(directChildren, child)
+		end
+	end
+
+	if #directChildren > 0 then
+		print(string.format("Breakable hierarchy detected - Main: %s | Nested parts: %d", part.Name, #directChildren))
+
+		local Debris = game:GetService("Debris")
+
+		for _, nestedPart in ipairs(directChildren) do
+			if nestedPart.Parent ~= workspace then
+				nestedPart.Parent = parentContainer or workspace
+			end
+
+			nestedPart.Anchored = false
+			nestedPart.CanCollide = true
+			nestedPart.Massless = true
+			nestedPart.CustomPhysicalProperties = LIGHT_DEBRIS_PROPERTIES
+
+			local velocityMultiplier = (ejectStrength == "strong") and 150 or 80
+
+			local ejectDirection
+			if rescuePosition then
+				local awayDirection = (nestedPart.Position - rescuePosition).Unit
+				ejectDirection = Vector3.new(
+					awayDirection.X + math.random(-5, 5) / 10,
+					math.random(25, 50) / 10,
+					awayDirection.Z + math.random(-5, 5) / 10
+				).Unit
+			else
+				ejectDirection = Vector3.new(
+					math.random(-10, 10) / 10,
+					math.random(25, 50) / 10,
+					math.random(-10, 10) / 10
+				).Unit
+			end
+
+			nestedPart.AssemblyLinearVelocity = ejectDirection * velocityMultiplier
+
+			local rotationMultiplier = (ejectStrength == "strong") and 15 or 10
+			local randomRotation = Vector3.new(
+				math.random(-rotationMultiplier, rotationMultiplier),
+				math.random(-rotationMultiplier, rotationMultiplier),
+				math.random(-rotationMultiplier, rotationMultiplier)
+			)
+			nestedPart.AssemblyAngularVelocity = randomRotation
+			print("Ejected nested part:", nestedPart.Name)
+		end
+
+		Debris:AddItem(part, 0.1)
+		print("Main part", part.Name, "scheduled for removal")
+
+		return
+	end
+
+	-- ถ้าไม่มี nested parts ให้ใช้ระบบเดิม (connected parts) และแน่ใจว่ามีข้อมูลสำหรับ part หลัก
+	print("No nested parts detected - Using old connected parts system")
+
+	connectedPartsData = connectedPartsData or {}
+	local hasMainPart = false
+	for _, partInfo in ipairs(connectedPartsData) do
+		if partInfo.Name == part.Name then
+			hasMainPart = true
+			break
+		end
+	end
+
+	if not hasMainPart then
+		print("Adding main part to connectedPartsData for fallback ejection:", part.Name)
+		table.insert(connectedPartsData, {
+			Name = part.Name,
+			Position = part.Position,
+			Instance = part
+		})
+	end
+
 	-- Unanchor และเพิ่มแรงกระเด็นให้ part หลักและ connected parts
 	for _, partInfo in ipairs(connectedPartsData) do
-		local connectedPart = workspace:FindFirstChild(partInfo.Name, true)
+		local connectedPart = nil
+		if partInfo.Instance and partInfo.Instance:IsA("BasePart") and partInfo.Instance:IsDescendantOf(workspace) then
+			connectedPart = partInfo.Instance
+		else
+			connectedPart = workspace:FindFirstChild(partInfo.Name, true)
+		end
 		if connectedPart and (connectedPart:IsA("BasePart") or connectedPart:IsA("MeshPart")) then
 			-- เจาะได้ทั้ง part ที่ Anchored และ Unanchored
 			-- Unanchor ถ้ายัง anchored อยู่
@@ -1046,16 +1153,8 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 				connectedPart.Anchored = false
 			end
 			connectedPart.CanCollide = true
-
-			-- ตั้งค่า physics properties
-			local customProps = PhysicalProperties.new(
-				0.3,    -- Density
-				0.1,    -- Friction
-				0.7,    -- Elasticity
-				1.0,    -- FrictionWeight
-				1.0     -- ElasticityWeight
-			)
-			connectedPart.CustomPhysicalProperties = customProps
+			connectedPart.Massless = true
+			connectedPart.CustomPhysicalProperties = LIGHT_DEBRIS_PROPERTIES
 
 			-- กระเด็นทุกครั้ง แต่ความแรงแตกต่างกัน
 			local isMainPart = (connectedPart == part)
