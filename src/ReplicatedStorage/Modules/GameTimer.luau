@@ -268,13 +268,53 @@ function GameTimer.addCoins(amount)
 				local newCount = currentCount + amount
 				coinLabel.Text = tostring(newCount)
 
-				-- Animation สำหรับ coin icon
 				local TweenService = game:GetService("TweenService")
-				local pulseInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, true)
-				local pulseTween = TweenService:Create(coinIcon, pulseInfo, {
-					Size = UDim2.new(0.7, 0, 0.9, 0) -- Scale-based pulse: 70% width, 90% height
-				})
-				pulseTween:Play()
+
+				-- Animation สำหรับ coin icon ด้วย UIScale
+				local iconScale = coinIcon:FindFirstChild("CoinIconScale")
+				if not iconScale then
+					iconScale = Instance.new("UIScale")
+					iconScale.Name = "CoinIconScale"
+					iconScale.Scale = 1
+					iconScale.Parent = coinIcon
+				end
+
+				local iconScaleUp = TweenService:Create(iconScale,
+					TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+					{Scale = 1.2}
+				)
+				local iconScaleDown = TweenService:Create(iconScale,
+					TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+					{Scale = 1}
+				)
+
+				iconScaleUp:Play()
+				iconScaleUp.Completed:Connect(function()
+					iconScaleDown:Play()
+				end)
+
+				-- Animation สำหรับ coin label ด้วย UIScale
+				local labelScale = coinLabel:FindFirstChild("CoinLabelScale")
+				if not labelScale then
+					labelScale = Instance.new("UIScale")
+					labelScale.Name = "CoinLabelScale"
+					labelScale.Scale = 1
+					labelScale.Parent = coinLabel
+				end
+
+				local labelScaleUp = TweenService:Create(labelScale,
+					TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+					{Scale = 1.3}
+				)
+				local labelScaleDown = TweenService:Create(labelScale,
+					TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+					{Scale = 1}
+				)
+
+				labelScaleUp:Play()
+				labelScaleUp.Completed:Connect(function()
+					labelScaleDown:Play()
+				end)
 
 				-- Text color flash
 				local flashInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)

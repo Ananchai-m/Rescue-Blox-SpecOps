@@ -8,6 +8,15 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local CoinEffect = {}
 
+-- Lazy load GameTimer to avoid circular dependency
+local GameTimer = nil
+local function getGameTimer()
+	if not GameTimer then
+		GameTimer = require(ReplicatedStorage.Modules.GameTimer)
+	end
+	return GameTimer
+end
+
 -- Configuration
 local CONFIG = {
 	AnimationDuration = 0.8,
@@ -443,6 +452,12 @@ function CoinEffect.SpawnCoins(position: Vector3, amount: number, targetPlayer: 
 
 		animateCoinGui(coin, startPosition, targetPosition, delay, function()
 			coinsCollected += 1
+
+			-- Update coin count in GameTimer
+			local timer = getGameTimer()
+			if timer then
+				timer.addCoins(1)
+			end
 
 			-- Animate coin icon scale
 				if targetCoinIcon and originalIconSize and originalIconAnchorPoint then

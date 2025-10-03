@@ -2,7 +2,7 @@ local GameConfig = {}
 
 -- Game Settings
 GameConfig.MAX_PLAYERS = 1
-GameConfig.GAME_DURATION = 60 -- 5 minutes in seconds
+GameConfig.GAME_DURATION = 300 -- 5 minutes in seconds
 GameConfig.VOTING_TIMER = 15 -- seconds for map voting
 
 -- Waiting System Settings
