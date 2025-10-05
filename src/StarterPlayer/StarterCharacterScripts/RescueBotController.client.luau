@@ -29,6 +29,7 @@ local stopOriginalRescueEvent = remoteEvents:WaitForChild("StopOriginalRescue")
 local drillProgressRemote = remoteEvents:WaitForChild("HydraulicDrillProgress")
 local waitingSystemRemote = remoteEvents:WaitForChild("WaitingSystem")
 local mapVotingRemote = remoteEvents:WaitForChild("MapVoting")
+local toggleDrillModeRemote = remoteEvents:WaitForChild("ToggleDrillMode")
 
 local player = Players.LocalPlayer
 local character = script.Parent
@@ -45,6 +46,9 @@ local connectionThrottle = nil
 local isRescueMode = false
 local rescueModel = nil
 local connections = {}
+
+-- ตัวแปรสำหรับ Drill Mode
+local isDrillModeActive = false
 
 -- Vehicle control จัดการโดย VehicleController module แล้ว
 
@@ -833,6 +837,22 @@ connections.inputBegan = UserInputService.InputBegan:Connect(function(input, gam
 		end
 	end
 
+	-- Toggle Drill Mode with Q key
+	if input.KeyCode == Enum.KeyCode.Q then
+		if isRescueMode or VehicleController.getOriginalRescueModel() then
+			isDrillModeActive = not isDrillModeActive
+
+			-- ส่งคำสั่งไป Server ให้ปรับ Tube2 และ Head HingeConstraint
+			toggleDrillModeRemote:FireServer(isDrillModeActive)
+
+			if isDrillModeActive then
+				print("[Drill Mode] Activated - Ready to drill!")
+			else
+				print("[Drill Mode] Deactivated")
+			end
+		end
+	end
+
 	-- Camera tracking controls
 	if input.KeyCode == Enum.KeyCode.Z then
 		-- กด Z เพื่อ toggle camera tracking (ติดตาม Camera part ของ rescue vehicle)
@@ -859,12 +879,56 @@ connections.inputBegan = UserInputService.InputBegan:Connect(function(input, gam
 		local mouse = player:GetMouse()
 		local clickPosition = mouse.Hit.Position
 
-		-- ลองเจาะก่อน ถ้าไม่มี target ให้เจาะก็เปิด hydraulic arm
-		local didDrill = DrillSystem.handleDrillingClick(clickPosition)
+		-- เช็คว่า DrillArm อยู่ที่ TargetAngle = 0 หรือไม่ และ Head.HingeConstraint.Enabled
+		local canDrill = false
+		local currentTargetAngle = nil
+		local currentRescueModel = VehicleController.getOriginalRescueModel() or rescueModel
+		if currentRescueModel then
+			local drillArm = currentRescueModel:FindFirstChild("DrillArm")
+			if drillArm then
+				-- เช็ค Tube2.HingeConstraint TargetAngle
+				local tube2 = drillArm:FindFirstChild("Tube2")
+				if tube2 then
+					local hingeConstraint = tube2:FindFirstChild("HingeConstraint")
+					if hingeConstraint then
+						currentTargetAngle = hingeConstraint.TargetAngle
+						print("[Click Debug] TargetAngle:", currentTargetAngle, "isDrillModeActive:", isDrillModeActive)
+						if hingeConstraint.TargetAngle == 0 then
+							canDrill = true
+						end
+					end
+				end
 
-		if not didDrill then
-			hydraulicRemote:FireServer()
-			print("Screen clicked - Hydraulic arm activated!")
+				-- เช็ค Head.HingeConstraint.Enabled (ต้อง Enabled ด้วย)
+				local head = drillArm:FindFirstChild("Head")
+				if head then
+					local headHingeConstraint = head:FindFirstChild("HingeConstraint")
+					if headHingeConstraint and not headHingeConstraint.Enabled then
+						canDrill = false
+						print("[Click Debug] Head.HingeConstraint is disabled")
+					end
+				end
+			end
+		end
+
+		-- ลองเจาะได้ก็ต่อเมื่อ TargetAngle = 0 และเปิด Drill Mode
+		if canDrill and isDrillModeActive then
+			print("[Drill Mode] Drilling allowed - TargetAngle = 0")
+			local didDrill = DrillSystem.handleDrillingClick(clickPosition)
+
+			if not didDrill then
+				-- ถ้าไม่มี part ให้เจาะ ก็เปิด hydraulic arm ธรรมดา
+				hydraulicRemote:FireServer()
+				print("Screen clicked - Hydraulic arm activated!")
+			end
+		elseif isDrillModeActive and not canDrill then
+			-- ถ้าเปิด Drill Mode แต่ TargetAngle ไม่ใช่ 0 ให้แสดงข้อความเตือนและไม่ให้เจาะ
+			warn("[Drill Mode] Cannot drill! DrillArm must be at TargetAngle = 0. Current:", currentTargetAngle)
+			print("Press Q to move DrillArm to position 0")
+		else
+			-- ถ้าปิด Drill Mode (isDrillModeActive = false) ไม่ต้องทำอะไร
+			-- ไม่เรียก hydraulicRemote เพราะ Head.HingeConstraint ถูก Disable แล้ว
+			print("[Drill Mode] Drill mode is off - press Q to activate")
 		end
 	end
 
