@@ -203,6 +203,14 @@ function GameTimer.startCountdown(duration)
 
 			print("Game timer finished!")
 
+			-- ลบ DrillProgressGui ก่อนเรียก callback
+			local playerGui = player:WaitForChild("PlayerGui")
+			local drillProgressGui = playerGui:FindFirstChild("DrillProgressGui")
+			if drillProgressGui then
+				drillProgressGui:Destroy()
+				print("[GameTimer] Cleared DrillProgressGui before showing summary")
+			end
+
 			-- เรียก callback function ถ้ามี
 			if GameTimer.onTimerFinished then
 				GameTimer.onTimerFinished()
