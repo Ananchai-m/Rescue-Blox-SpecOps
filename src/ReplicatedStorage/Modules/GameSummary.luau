@@ -3,6 +3,7 @@
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GameConfig = require(script.Parent.GameConfig)
 
 local GameSummary = {}
@@ -186,6 +187,10 @@ function GameSummary.createSummaryUI(player)
 
 	-- ฟังก์ชันปิด Summary (ใช้ร่วมกันระหว่าง manual click และ auto-close)
 	local function closeSummary()
+		-- เคลียร์ coins ก่อนปิด summary (client-side)
+		local GameTimer = require(ReplicatedStorage.Modules.GameTimer)
+		GameTimer.clearCoins()
+
 		local backgroundCloseTween = TweenService:Create(background,
 			TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 			{BackgroundTransparency = 1}
@@ -202,7 +207,7 @@ function GameSummary.createSummaryUI(player)
 		backgroundCloseTween.Completed:Connect(function()
 			summaryGui:Destroy()
 
-			-- เรียก callback เมื่อปิด summary
+			-- เรียก callback เมื่อปิด summary (server จะจัดการ clear victims/obstacles)
 			if GameSummary.onSummaryClosed then
 				GameSummary.onSummaryClosed(player)
 			end

@@ -48,8 +48,8 @@ local function getToggleTargets(emitter: Instance): {Instance}
 		if success and value ~= nil then
 			targets[#targets + 1] = instance
 			local attr = instance:GetAttribute(EMITTER_ATTRIBUTE)
-			if type(attr) ~= "boolean" then
-				instance:SetAttribute(EMITTER_ATTRIBUTE, value)
+			if type(attr) ~= "number" then
+				instance:SetAttribute(EMITTER_ATTRIBUTE, if value then 1 else 0)
 				attr = value
 			end
 		end
@@ -66,7 +66,7 @@ end
 
 local function restoreTarget(instance: Instance)
 	local attr = instance:GetAttribute(EMITTER_ATTRIBUTE)
-	local targetEnabled = if type(attr) == "boolean" then attr else false
+	local targetEnabled = if type(attr) == "number" then (attr == 1) else false
 	pcall(function()
 		if instance:IsA("Configuration") then
 			instance:SetAttribute("Enabled", targetEnabled)
@@ -475,11 +475,9 @@ function CoinEffect.SpawnCoins(position: Vector3, amount: number, targetPlayer: 
 				collectSound:Destroy()
 			end)
 
-				-- Reset coin icon when all coins are collected
+				-- Reset coin icon when all coins from this batch are collected
 				if coinsCollected == amount then
-					print("All coins collected!")
-
-				-- Reset coin icon to original state
+					-- Reset coin icon to original state
 					if targetCoinIcon and originalIconSize and originalIconPosition and originalIconAnchorPoint then
 						task.wait(0.3) -- Small delay before reset
 						resetCoinIcon(targetCoinIcon, originalIconSize, originalIconPosition, originalIconAnchorPoint)

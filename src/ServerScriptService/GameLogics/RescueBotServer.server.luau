@@ -361,26 +361,6 @@ local BASE_TORQUE = 12000
 local TORQUE_STEP = 18000
 local COMBO_TIMEOUT = 1.5
 
-local function findWeldInside(part)
-	if not part then
-		return nil
-	end
-
-	local weld = part:FindFirstChildOfClass("WeldConstraint") or part:FindFirstChildOfClass("Weld") or part:FindFirstChildOfClass("ManualWeld")
-	if weld then
-		return weld
-	end
-
-	for _, descendant in ipairs(part:GetDescendants()) do
-		if descendant:IsA("WeldConstraint") or descendant:IsA("Weld") or descendant:IsA("ManualWeld") then
-			return descendant
-		end
-	end
-
-	return nil
-end
-
-
 local function locateDrillTarget(state)
 	if not state then
 		return nil
@@ -412,23 +392,26 @@ local function locateDrillTarget(state)
 			end
 		end
 
-		-- มองหา RootPart หรือ part ที่มี Weld เยอะๆ
+		-- มองหา part ทั้งหมดที่สามารถเจาะได้
 		if candidate ~= head and not isOwn and not isBodyPart and candidate:IsA("BasePart") then
-			-- หา welds ทั้งหมดใน part นี้
-			local welds = {}
-			for _, descendant in ipairs(candidate:GetDescendants()) do
-				if descendant:IsA("WeldConstraint") or descendant:IsA("Weld") or descendant:IsA("ManualWeld") then
-					table.insert(welds, descendant)
+			-- ตรวจสอบว่า part อยู่ใน Obstacles folder หรือไม่
+			local isInObstacles = false
+			local ancestor = candidate.Parent
+			while ancestor and ancestor ~= workspace do
+				if ancestor.Name == "Obstacles" then
+					isInObstacles = true
+					break
 				end
+				ancestor = ancestor.Parent
 			end
 
-			-- ถ้ามี weld ให้เก็บไว้ โดยให้ RootPart มีความสำคัญสูงสุด
-			if #welds > 0 then
+			-- ยอมรับทุก part ใน Obstacles
+			if isInObstacles then
 				local distance = (candidate.Position - head.Position).Magnitude
-				local priority = candidate.Name == "Root" and 1000 or #welds -- RootPart ได้ priority สูงสุด
+				-- Priority ตามระยะใกล้ (ใกล้กว่า = priority สูงกว่า)
+				local priority = 100 - distance
 				table.insert(rootParts, {
 					part = candidate,
-					welds = welds,
 					distance = distance,
 					priority = priority
 				})
@@ -436,7 +419,7 @@ local function locateDrillTarget(state)
 		end
 	end
 
-	-- เรียงตาม priority (RootPart ก่อน) แล้วถึงระยะใกล้
+	-- เรียงตาม priority แล้วถึงระยะใกล้
 	if #rootParts > 0 then
 		table.sort(rootParts, function(a, b)
 			if a.priority ~= b.priority then
@@ -446,13 +429,11 @@ local function locateDrillTarget(state)
 		end)
 
 		local selected = rootParts[1]
-		-- สุ่มเลือก weld ใน part นี้
-		local randomWeld = selected.welds[math.random(1, #selected.welds)]
 
+		-- ส่งกลับ part ที่เลือก
 		return {
 			part = selected.part,
-			weld = randomWeld,
-			allWelds = selected.welds
+			distance = selected.distance
 		}
 	end
 
@@ -483,7 +464,6 @@ local function updateDrillProgress(player, state)
 	if not current or current.part ~= detected.part then
 		current = {
 			part = detected.part,
-			weld = detected.weld,
 			clicks = 0,
 			required = DrillConfig.CLICKS_REQUIRED,
 		}
@@ -495,69 +475,17 @@ local function updateDrillProgress(player, state)
 			requiredClicks = current.required,
 			clicks = 0,
 		})
-	else
-		current.weld = current.weld or detected.weld
 	end
 
 	current.clicks += 1
 	local progress = math.clamp(current.clicks / current.required, 0, 1)
 
 	if progress >= 1 then
-		-- เก็บข้อมูล part ที่จะ eject ก่อนทำลาย weld
-		local weld = current.weld
-		local partToEject = nil
-
-		if weld and weld.Parent then
-			print("DEBUG: Weld type:", weld.ClassName)
-			print("DEBUG: Weld.Part0:", weld.Part0 and weld.Part0.Name or "nil")
-			print("DEBUG: Weld.Part1:", weld.Part1 and weld.Part1.Name or "nil")
-
-			-- เก็บ Part1 ที่จะ eject ก่อนทำลาย weld
-			if weld.Part1 and weld.Part1.Name ~= "Root" then
-				partToEject = weld.Part1
-				print("DEBUG: Selected Part1 for ejection:", partToEject.Name)
-			elseif weld.Part0 and weld.Part0.Name ~= "Root" then
-				-- fallback case ถ้า structure ไม่เป็นไปตามคาด
-				partToEject = weld.Part0
-				print("DEBUG: Selected Part0 for ejection (fallback):", partToEject.Name)
-			else
-				print("DEBUG: No valid part to eject found")
-			end
-
-			-- ทำลาย weld หลังจากเก็บข้อมูลแล้ว
-			pcall(function()
-				weld:Destroy()
-				print("DEBUG: Weld destroyed successfully")
-			end)
-		else
-			-- หากหา weld ไม่เจอแล้ว ให้ลองค้นหาอีกครั้งก่อนจบ
-			local freshWeld = findWeldInside(current.part)
-			if freshWeld and freshWeld.Part1 and freshWeld.Part1.Name ~= "Root" then
-				partToEject = freshWeld.Part1
-				print("DEBUG: Found fresh weld, selected Part1:", partToEject.Name)
-				pcall(function()
-					freshWeld:Destroy()
-				end)
-			elseif freshWeld and freshWeld.Part0 and freshWeld.Part0.Name ~= "Root" then
-				partToEject = freshWeld.Part0
-				print("DEBUG: Found fresh weld, selected Part0:", partToEject.Name)
-				pcall(function()
-					freshWeld:Destroy()
-				end)
-			else
-				print("DEBUG: No fresh weld found or no valid parts")
-			end
-		end
+		-- เจาะเสร็จแล้ว - Unanchor part (ไม่ต้องทำลาย weld)
+		local partToEject = current.part
 
 		if partToEject and partToEject.Parent then
-			print("Ejecting part:", partToEject.Name, "from drilling completion")
-
-			-- Fire client to show coin effect when part breaks
-			local coinAmount = math.random(2, 4) -- Random 2-4 coins per drill
-			local drillCompleteRemote = remoteEventsFolder:FindFirstChild("DrillComplete")
-			if drillCompleteRemote then
-				drillCompleteRemote:FireClient(player, partToEject.Position, coinAmount)
-			end
+			print("Drilling complete - Unanchoring part:", partToEject.Name)
 
 			-- ยกเลิก anchoring และเปิด CanCollide
 			partToEject.Anchored = false
@@ -592,11 +520,24 @@ local function updateDrillProgress(player, state)
 				math.random(-5, 5)
 			)
 
-			-- ใช้ Debris Service เพื่อลบ part หลังจาก 5 วินาที
-			local Debris = game:GetService("Debris")
-			Debris:AddItem(partToEject, 5)
-		else
-			print("No part to eject - RootPart remains in place")
+			-- เช็คว่าเป็น root part (parent Model) หรือไม่
+			-- ถ้า parent เป็น Model หรือ Folder = root part ให้ debris
+			-- ถ้า parent เป็น BasePart = children part ข้าม debris
+			local isRootPart = false
+			if partToEject.Parent then
+				if partToEject.Parent:IsA("Model") or partToEject.Parent:IsA("Folder") then
+					isRootPart = true
+				end
+			end
+
+			if isRootPart then
+				-- ใช้ Debris Service เพื่อลบ root part หลังจาก 10 วินาที
+				local Debris = game:GetService("Debris")
+				Debris:AddItem(partToEject, 10)
+				print("Debris added to root part:", partToEject.Name)
+			else
+				print("Skipped debris for children part:", partToEject.Name)
+			end
 		end
 		drillProgressRemote:FireClient(player, {
 			status = "complete",
@@ -1344,6 +1285,15 @@ local function startGame()
 		table.insert(playersArray, player.Name)
 	end
 
+	-- Spawn obstacles ก่อน (จาก ServerStorage.Models.Obstacles -> workspace.Building_LV1.Obstacles)
+	print("Spawning obstacles for the game...")
+	local obstaclesSpawned = VictimSpawner.spawnAllObstacles()
+	if obstaclesSpawned then
+		print("Obstacles spawned successfully")
+	else
+		warn("Failed to spawn obstacles")
+	end
+
 	-- Spawn victims ทั้งหมด
 	print("Spawning victims for the game...")
 	local victimsSpawned = VictimSpawner.spawnAllVictims()
@@ -1376,18 +1326,44 @@ local function endGame()
 
 	isGamePlaying = false
 
-	-- ลบ victims เมื่อเกมจบ
-	print("Game ended - clearing all victims...")
-	VictimSpawner.clearAllVictims()
-
 	-- แสดงสรุปผลเกม
 	print("Showing game summary...")
 	GameSummary.printStats() -- Debug stats
 	task.wait(2) -- รอให้ effects ต่างๆ เสร็จ
 
 	-- Set callback สำหรับเมื่อผู้เล่นปิด summary
+	local playersClosed = {}
+	local totalPlayers = #game:GetService("Players"):GetPlayers()
+	local hasRespawned = false -- ป้องกันการ spawn ซ้ำ
+
 	GameSummary.onSummaryClosed = function(player)
 		GameSummary.resetToLobby(player)
+
+		task.wait(5)
+
+		-- เช็คว่าผู้เล่นคนนี้ปิดหรือยัง
+		if not playersClosed[player.UserId] then
+			playersClosed[player.UserId] = true
+
+			-- นับจำนวนผู้เล่นที่ปิดแล้ว
+			local closedCount = 0
+			for _ in pairs(playersClosed) do
+				closedCount = closedCount + 1
+			end
+
+			-- ถ้าเป็นผู้เล่นคนสุดท้ายที่ปิด summary ให้ clear และ spawn ใหม่
+			if closedCount >= totalPlayers and not hasRespawned then
+				hasRespawned = true
+				print("All players closed summary - clearing obstacles and victims...")
+				VictimSpawner.clearAllObstacles()
+				VictimSpawner.clearAllVictims()
+
+				print("Respawning obstacles and victims...")
+				VictimSpawner.spawnAllObstacles()
+				VictimSpawner.spawnAllVictims()
+				print("Map reset complete - obstacles and victims respawned")
+			end
+		end
 	end
 
 	GameSummary.showSummaryToAll()
@@ -1395,8 +1371,18 @@ local function endGame()
 	print("Server: Game ended - accepting new players")
 	waitingSystemRemote:FireAllClients("gameEnded")
 
-	-- รีเซ็ต GameSummary สำหรับเกมถัดไป
-	task.wait(10) -- รอให้ผู้เล่นดู summary
+	-- รีเซ็ต GameSummary สำหรับเกมถัดไป และ clear/respawn obstacles/victims ถ้ายังไม่ได้ทำ
+	task.wait(10) -- รอให้ผู้เล่นดู summary (auto-close)
+	if not hasRespawned then
+		print("Auto-close timer expired - clearing obstacles and victims...")
+		VictimSpawner.clearAllObstacles()
+		VictimSpawner.clearAllVictims()
+
+		print("Respawning obstacles and victims...")
+		VictimSpawner.spawnAllObstacles()
+		VictimSpawner.spawnAllVictims()
+		print("Map reset complete - obstacles and victims respawned")
+	end
 	GameSummary.reset()
 end
 

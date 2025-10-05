@@ -31,14 +31,14 @@ local function attachCoinEmitter(targetCoinFrame: Frame)
 	emitterClone.Name = emitterTemplate.Name
 	emitterClone.Parent = targetCoinFrame
 
-	emitterClone:SetAttribute(emitterAttributeName, false)
+	emitterClone:SetAttribute(emitterAttributeName, 0)
 
 	for _, descendant in emitterClone:GetDescendants() do
 		local success, currentEnabled = pcall(function()
 			return descendant.Enabled
 		end)
 		if success then
-			descendant:SetAttribute(emitterAttributeName, false)
+			descendant:SetAttribute(emitterAttributeName, 0)
 			if currentEnabled ~= false then
 				pcall(function()
 					descendant.Enabled = false
@@ -346,6 +346,20 @@ function GameTimer.getCoinCount()
 		end
 	end
 	return 0
+end
+
+-- ฟังก์ชันเคลียร์ coins (รีเซ็ตเป็น 0)
+function GameTimer.clearCoins()
+	if timerGui then
+		local coinFrame = timerGui:FindFirstChild("CoinFrame")
+		if coinFrame then
+			local coinLabel = coinFrame:FindFirstChild("CoinLabel")
+			if coinLabel then
+				coinLabel.Text = "0"
+				print("[GameTimer] Coins cleared")
+			end
+		end
+	end
 end
 
 return GameTimer

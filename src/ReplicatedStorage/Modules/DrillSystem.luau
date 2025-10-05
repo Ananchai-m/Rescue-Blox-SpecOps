@@ -292,22 +292,19 @@ local function findConnectedParts(startPart, visitedParts, maxDepth)
 		obstaclesFolder = workspace:FindFirstChild("Obstacles")
 	end
 
-	-- ถ้าไม่มี Obstacles folder ให้ทำงานปกติ (ไม่เช็ค)
-	local isInObstacles = true
-	if obstaclesFolder then
-		isInObstacles = false
-		local ancestor = startPart.Parent
-		while ancestor and ancestor ~= workspace do
-			if ancestor == obstaclesFolder then
-				isInObstacles = true
-				break
-			end
-			ancestor = ancestor.Parent
+	-- เช็คว่า part อยู่ใน Obstacles folder หรือไม่ (เช็คจากชื่อ)
+	local isInObstacles = false
+	local ancestor = startPart.Parent
+	while ancestor and ancestor ~= workspace do
+		if ancestor.Name == "Obstacles" then
+			isInObstacles = true
+			break
 		end
+		ancestor = ancestor.Parent
+	end
 
-		if not isInObstacles then
-			return visitedParts
-		end
+	if not isInObstacles then
+		return visitedParts
 	end
 
 	-- ทิศทาง 6 ด้าน: บน, ล่าง, หน้า, หลัง, ซ้าย, ขวา
@@ -339,18 +336,15 @@ local function findConnectedParts(startPart, visitedParts, maxDepth)
 		if rayResult and rayResult.Instance then
 			local hitPart = rayResult.Instance
 
-			-- ตรวจสอบว่า hitPart อยู่ใน Obstacles folder (ถ้ามี)
-			local hitIsInObstacles = true
-			if obstaclesFolder then
-				hitIsInObstacles = false
-				local hitAncestor = hitPart.Parent
-				while hitAncestor and hitAncestor ~= workspace do
-					if hitAncestor == obstaclesFolder then
-						hitIsInObstacles = true
-						break
-					end
-					hitAncestor = hitAncestor.Parent
+			-- ตรวจสอบว่า hitPart อยู่ใน Obstacles folder (เช็คจากชื่อ)
+			local hitIsInObstacles = false
+			local hitAncestor = hitPart.Parent
+			while hitAncestor and hitAncestor ~= workspace do
+				if hitAncestor.Name == "Obstacles" then
+					hitIsInObstacles = true
+					break
 				end
+				hitAncestor = hitAncestor.Parent
 			end
 
 			-- ตรวจสอบว่าเป็น BasePart/MeshPart, Anchored, อยู่ใน Obstacles, และยังไม่เคยเจอ
@@ -586,11 +580,11 @@ local function findPartAtDrillArm()
 		warn("Raycast hit:", hitPart.Name, "Distance:", rayResult.Distance, "Position:", hitPart.Position)
 
 		if (hitPart:IsA("BasePart") or hitPart:IsA("MeshPart")) then
-			-- เช็คว่าอยู่ใน Obstacles folder
+			-- เช็คว่าอยู่ใน Obstacles folder (เช็คจากชื่อ)
 			local isInObstacles = false
 			local ancestor = hitPart.Parent
 			while ancestor and ancestor ~= workspace do
-				if ancestor == obstaclesFolder then
+				if ancestor.Name == "Obstacles" then
 					isInObstacles = true
 					break
 				end

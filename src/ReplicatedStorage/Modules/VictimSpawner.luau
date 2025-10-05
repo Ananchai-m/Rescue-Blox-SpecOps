@@ -6,8 +6,9 @@ local Workspace = game:GetService("Workspace")
 
 local VictimSpawner = {}
 
--- ตัวแปรเก็บ spawned victims
+-- ตัวแปรเก็บ spawned victims และ obstacles
 local spawnedVictims = {}
+local spawnedObstacles = {}
 
 -- ฟังก์ชันสุ่มตำแหน่งบน BasePart (เท้าอยู่บนพื้นผิว)
 local function getRandomPositionOnPart(part)
@@ -98,6 +99,85 @@ local function spawnVictimAtPosition(position, spawnPointName)
 	return victim
 end
 
+-- ฟังก์ชัน spawn obstacles จาก ServerStorage ไป workspace
+function VictimSpawner.spawnAllObstacles()
+	print("Starting obstacles spawning process...")
+
+	-- หา ServerStorage.Models.Obstacles
+	local models = ServerStorage:FindFirstChild("Models")
+	if not models then
+		warn("Models folder not found in ServerStorage")
+		return false
+	end
+
+	local obstaclesFolder = models:FindFirstChild("Obstacles")
+	if not obstaclesFolder then
+		warn("Obstacles folder not found in ServerStorage.Models")
+		return false
+	end
+
+	-- หา workspace.Building_LV1.Obstacles
+	local buildingLV1 = Workspace:FindFirstChild("Building_LV1")
+	if not buildingLV1 then
+		warn("Building_LV1 not found in workspace")
+		return false
+	end
+
+	local targetObstaclesFolder = buildingLV1:FindFirstChild("Obstacles")
+	if targetObstaclesFolder then
+		-- ถ้ามี Obstacles folder อยู่แล้ว ให้ลบของเก่าทั้งหมดก่อน
+		print("Found existing Obstacles folder, clearing old obstacles...")
+		local clearedCount = 0
+		for _, child in ipairs(targetObstaclesFolder:GetChildren()) do
+			child:Destroy()
+			clearedCount = clearedCount + 1
+		end
+		print("Cleared", clearedCount, "old obstacles")
+	else
+		-- สร้าง Obstacles folder ถ้าไม่มี
+		targetObstaclesFolder = Instance.new("Folder")
+		targetObstaclesFolder.Name = "Obstacles"
+		targetObstaclesFolder.Parent = buildingLV1
+		print("Created Obstacles folder in Building_LV1")
+	end
+
+	-- เคลียร์ spawnedObstacles array ก่อน spawn ใหม่
+	spawnedObstacles = {}
+
+	-- Clone obstacles ทั้งหมดจาก ServerStorage
+	local successCount = 0
+	for _, obstacleModel in ipairs(obstaclesFolder:GetChildren()) do
+		if obstacleModel:IsA("Model") or obstacleModel:IsA("Folder") then
+			local clonedObstacle = obstacleModel:Clone()
+			clonedObstacle.Parent = targetObstaclesFolder
+			table.insert(spawnedObstacles, clonedObstacle)
+			successCount = successCount + 1
+			print("Spawned obstacle:", clonedObstacle.Name)
+		end
+	end
+
+	print("Successfully spawned", successCount, "obstacles")
+	return successCount > 0
+end
+
+-- ฟังก์ชันลบ obstacles ทั้งหมด
+function VictimSpawner.clearAllObstacles()
+	print("Clearing all spawned obstacles...")
+
+	local clearedCount = 0
+
+	-- ลบ obstacles จาก tracked array
+	for _, obstacle in ipairs(spawnedObstacles) do
+		if obstacle and obstacle.Parent then
+			obstacle:Destroy()
+			clearedCount = clearedCount + 1
+		end
+	end
+
+	spawnedObstacles = {}
+	print("Cleared", clearedCount, "obstacles total")
+end
+
 -- ฟังก์ชันหลักสำหรับ spawn victims ทั้งหมด
 function VictimSpawner.spawnAllVictims()
 	print("Starting victim spawning process...")
@@ -123,6 +203,9 @@ function VictimSpawner.spawnAllVictims()
 	end
 
 	print("Found", #spawnPoints, "spawn points for victims")
+
+	-- เคลียร์ spawnedVictims array ก่อน spawn ใหม่
+	spawnedVictims = {}
 
 	-- Spawn victim ที่แต่ละ spawn point
 	local successCount = 0
