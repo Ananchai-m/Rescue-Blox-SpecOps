@@ -645,7 +645,7 @@ local function findPartAtDrillArm()
 	if rayResult and rayResult.Instance then
 		local hitPart = rayResult.Instance
 		-- สร้าง beam สีเขียวถ้าเจอ part
-		createDebugBeam(rayOrigin, rayResult.Position, Color3.fromRGB(0, 255, 0))
+		--createDebugBeam(rayOrigin, rayResult.Position, Color3.fromRGB(0, 255, 0))
 		warn("Raycast hit:", hitPart.Name, "Distance:", rayResult.Distance, "Position:", hitPart.Position)
 
 		if (hitPart:IsA("BasePart") or hitPart:IsA("MeshPart")) then
@@ -674,7 +674,7 @@ local function findPartAtDrillArm()
 	else
 		-- สร้าง beam สีแดงถ้าไม่เจออะไร
 		local endPos = rayOrigin + rayDirection
-		createDebugBeam(rayOrigin, endPos, Color3.fromRGB(255, 0, 0))
+		--createDebugBeam(rayOrigin, endPos, Color3.fromRGB(255, 0, 0))
 		warn("✗ Raycast hit nothing - DrillArm at:", rayOrigin, "Direction:", rayDirection)
 	end
 
