@@ -15,6 +15,7 @@ local recentlyCompleted = {} -- เก็บ part ที่เพิ่งเจ
 local currentDrillingPart = nil -- Part ที่กำลังเจาะอยู่
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
+local drillEffectStopTimer = nil -- Timer สำหรับหยุด effect
 
 -- UI Variables
 local drillGui = nil
@@ -480,6 +481,74 @@ end
 
 -- ===== PUBLIC API =====
 
+-- ฟังก์ชันเปิด Particle Effects
+local function enableDrillEffects()
+	local rescueModelName = player.Name .. "_Rescue"
+	local rescueModel = workspace:FindFirstChild(rescueModelName)
+
+	if not rescueModel then return end
+
+	local drillArm = rescueModel:FindFirstChild("DrillArm")
+	if not drillArm then return end
+
+	local head = drillArm:FindFirstChild("Head")
+	if not head then return end
+
+	-- Enable effects ใน AttachmentEffect1
+	local attachment1 = head:FindFirstChild("AttachmentEffect1")
+	if attachment1 then
+		for _, effect in ipairs(attachment1:GetChildren()) do
+			if effect:IsA("ParticleEmitter") then
+				effect.Enabled = true
+			end
+		end
+	end
+
+	-- Enable effects ใน AttachmentEffect2
+	local attachment2 = head:FindFirstChild("AttachmentEffect2")
+	if attachment2 then
+		for _, effect in ipairs(attachment2:GetChildren()) do
+			if effect:IsA("ParticleEmitter") then
+				effect.Enabled = true
+			end
+		end
+	end
+end
+
+-- ฟังก์ชันปิด Particle Effects
+local function disableDrillEffects()
+	local rescueModelName = player.Name .. "_Rescue"
+	local rescueModel = workspace:FindFirstChild(rescueModelName)
+
+	if not rescueModel then return end
+
+	local drillArm = rescueModel:FindFirstChild("DrillArm")
+	if not drillArm then return end
+
+	local head = drillArm:FindFirstChild("Head")
+	if not head then return end
+
+	-- Disable effects ใน AttachmentEffect1
+	local attachment1 = head:FindFirstChild("AttachmentEffect1")
+	if attachment1 then
+		for _, effect in ipairs(attachment1:GetChildren()) do
+			if effect:IsA("ParticleEmitter") then
+				effect.Enabled = false
+			end
+		end
+	end
+
+	-- Disable effects ใน AttachmentEffect2
+	local attachment2 = head:FindFirstChild("AttachmentEffect2")
+	if attachment2 then
+		for _, effect in ipairs(attachment2:GetChildren()) do
+			if effect:IsA("ParticleEmitter") then
+				effect.Enabled = false
+			end
+		end
+	end
+end
+
 function DrillSystem.clearOldDrillingData()
 	drillingTargets = {}
 	recentlyCompleted = {}
@@ -636,6 +705,20 @@ function DrillSystem.handleDrillingClick(clickPosition)
 			drillSound:Destroy()
 		end)
 	end
+
+	-- เปิด Particle Effects เมื่อคลิก
+	enableDrillEffects()
+
+	-- ยกเลิก timer เก่าถ้ามี
+	if drillEffectStopTimer then
+		task.cancel(drillEffectStopTimer)
+	end
+
+	-- ตั้ง timer ใหม่เพื่อปิด effects หลังหยุดคลิก 0.5 วินาที
+	drillEffectStopTimer = task.delay(0.5, function()
+		disableDrillEffects()
+		drillEffectStopTimer = nil
+	end)
 
 	-- ถ้ากำลังเจาะ part อยู่ ให้เจาะต่อไปเลยโดยไม่ต้องหา part ใหม่
 	if currentDrillingPart and drillingTargets[currentDrillingPart] then
