@@ -613,6 +613,30 @@ local function findPartAtDrillArm()
 end
 
 function DrillSystem.handleDrillingClick(clickPosition)
+	-- หา DrillArm.PrimaryPart เพื่อเล่นเสียงเจาะ
+	local rescueModelName = player.Name .. "_Rescue"
+	local rescueModel = workspace:FindFirstChild(rescueModelName)
+	local drillArmPart = nil
+
+	if rescueModel then
+		local drillArm = rescueModel:FindFirstChild("DrillArm")
+		if drillArm and drillArm.PrimaryPart then
+			drillArmPart = drillArm.PrimaryPart
+		end
+	end
+
+	-- เล่นเสียงเจาะทุกครั้งที่คลิก
+	if drillArmPart then
+		local drillSound = Instance.new("Sound")
+		drillSound.SoundId = "rbxassetid://9118907884"
+		drillSound.Volume = 1
+		drillSound.Parent = drillArmPart
+		drillSound:Play()
+		task.delay(2, function()
+			drillSound:Destroy()
+		end)
+	end
+
 	-- ถ้ากำลังเจาะ part อยู่ ให้เจาะต่อไปเลยโดยไม่ต้องหา part ใหม่
 	if currentDrillingPart and drillingTargets[currentDrillingPart] then
 		warn("⚙ Continuing to drill:", currentDrillingPart.Name)
