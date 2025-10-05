@@ -84,6 +84,13 @@ function GameSummary.createSummaryUI(player)
 		existingGui:Destroy()
 	end
 
+	-- ลบ DrillProgressGui ก่อนแสดง Summary
+	local drillProgressGui = playerGui:FindFirstChild("DrillProgressGui")
+	if drillProgressGui then
+		drillProgressGui:Destroy()
+		print("[GameSummary] Cleared DrillProgressGui")
+	end
+
 	-- สร้าง ScreenGui
 	local summaryGui = Instance.new("ScreenGui")
 	summaryGui.Name = "GameSummaryGui"
