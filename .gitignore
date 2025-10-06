@@ -9,6 +9,9 @@ dist/
 .vscode/
 *.code-workspace
 
+# Wally packages
+Packages/
+
 # OS files
 .DS_Store
 Thumbs.db
