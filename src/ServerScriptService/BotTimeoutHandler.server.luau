@@ -5,11 +5,11 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GameSummary = require(ReplicatedStorage.Modules.GameSummary)
 
--- รอ RemoteEvent
+-- รอ BindableEvent
 local remoteEvents = ReplicatedStorage:WaitForChild("RescueBotRemotes")
 local botTimeoutEvent = remoteEvents:WaitForChild("BotTimeout")
 
-botTimeoutEvent.OnServerEvent:Connect(function(player)
+botTimeoutEvent.Event:Connect(function(player)
 	print(`[BotTimeoutHandler] Player {player.Name} timeout - showing summary`)
 
 	-- Setup callback เพื่อพาผู้เล่นกลับ lobby เมื่อปิด summary

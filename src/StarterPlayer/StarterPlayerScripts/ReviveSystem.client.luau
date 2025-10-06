@@ -1,0 +1,284 @@
+--!strict
+-- ReviveSystem.client.luau
+-- ระบบช่วยเหลือเพื่อน RescueBot ที่พัง (แบบ Custom UI เหมือน Victim)
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Import GameConfig
+local GameConfig = require(ReplicatedStorage.Modules.GameConfig)
+local reviveSettings = GameConfig.getRescueBotSettings().revive
+
+-- Configuration
+local REVIVE_DISTANCE = reviveSettings.maxDistance or 15
+local HOLD_DURATION = reviveSettings.holdDuration or 5
+local REVIVE_KEY = Enum.KeyCode.R
+
+-- Variables
+local nearestDownedBot: Model? = nil
+local billboardGui: BillboardGui? = nil
+local progressBg: Frame? = nil
+local isReviving = false
+local holdStartTime = 0
+local progressFill: Frame? = nil
+local heartbeatConnection: RBXScriptConnection? = nil
+
+-- RemoteEvents
+local remoteEvents = ReplicatedStorage:WaitForChild("RescueBotRemotes")
+local reviveRemote = remoteEvents:WaitForChild("ReviveTeammate") :: RemoteEvent
+
+-- สร้าง Billboard UI บนหุ่นยนต์ที่พัง
+local function createBillboard(downedBot: Model): (BillboardGui?, Frame?)
+	if not downedBot or not downedBot.PrimaryPart then
+		return nil, nil
+	end
+
+	-- ลบ billboard เก่า
+	if billboardGui then
+		billboardGui:Destroy()
+		billboardGui = nil
+	end
+
+	-- Create BillboardGui
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "ReviveBillboard"
+	billboard.AlwaysOnTop = true
+	billboard.Size = UDim2.new(4, 0, 2, 0)
+	billboard.StudsOffset = Vector3.new(0, 3, 0)
+	billboard.Adornee = downedBot.PrimaryPart
+	billboard.Parent = downedBot
+
+	-- Main frame
+	local mainFrame = Instance.new("Frame")
+	mainFrame.Name = "MainFrame"
+	mainFrame.Size = UDim2.new(1, 0, 1, 0)
+	mainFrame.Position = UDim2.new(0, 0, 0, 0)
+	mainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	mainFrame.BackgroundTransparency = 0.2
+	mainFrame.BorderSizePixel = 0
+	mainFrame.Parent = billboard
+
+	-- Corner
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0.2, 0)
+	corner.Parent = mainFrame
+
+	-- Stroke
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(255, 255, 255)
+	stroke.Thickness = 3
+	stroke.Parent = mainFrame
+
+	-- Action text
+	local actionText = Instance.new("TextLabel")
+	actionText.Name = "ActionText"
+	actionText.Size = UDim2.new(1, 0, 0.6, 0)
+	actionText.Position = UDim2.new(0, 0, 0, 0)
+	actionText.BackgroundTransparency = 1
+	actionText.Text = "[R] ช่วยเหลือ"
+	actionText.TextColor3 = Color3.fromRGB(255, 255, 255)
+	actionText.TextScaled = true
+	actionText.Font = Enum.Font.GothamBold
+	actionText.TextStrokeTransparency = 0
+	actionText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	actionText.Parent = mainFrame
+
+	-- Progress bar background
+	local progressBg = Instance.new("Frame")
+	progressBg.Name = "ProgressBg"
+	progressBg.Size = UDim2.new(0.9, 0, 0.25, 0)
+	progressBg.Position = UDim2.new(0.05, 0, 0.7, 0)
+	progressBg.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+	progressBg.BorderSizePixel = 0
+	progressBg.Visible = false
+	progressBg.Parent = mainFrame
+
+	local progressBgCorner = Instance.new("UICorner")
+	progressBgCorner.CornerRadius = UDim.new(0.5, 0)
+	progressBgCorner.Parent = progressBg
+
+	-- Progress bar fill
+	local fill = Instance.new("Frame")
+	fill.Name = "ProgressFill"
+	fill.Size = UDim2.new(0, 0, 1, 0)
+	fill.Position = UDim2.new(0, 0, 0, 0)
+	fill.BackgroundColor3 = Color3.fromRGB(40, 127, 71)
+	fill.BorderSizePixel = 0
+	fill.Parent = progressBg
+
+	local progressFillCorner = Instance.new("UICorner")
+	progressFillCorner.CornerRadius = UDim.new(0.5, 0)
+	progressFillCorner.Parent = fill
+
+	progressFill = fill
+	billboardGui = billboard
+
+	return billboard, progressBg
+end
+
+-- อัพเดต Billboard เมื่อเก็บตัวแปร progressBg ไว้
+local function updateBillboardReferences(billboard: BillboardGui?, bg: Frame?)
+	billboardGui = billboard
+	progressBg = bg
+end
+
+-- หา RescueBot ที่พังที่ใกล้ที่สุด
+local function findNearestDownedBot(): Model?
+	local myBot = workspace:FindFirstChild(player.Name .. "_Rescue")
+	if not myBot or not myBot.PrimaryPart then
+		return nil
+	end
+
+	local myPosition = myBot.PrimaryPart.Position
+	local nearest: Model? = nil
+	local nearestDistance = REVIVE_DISTANCE
+
+	for _, child in workspace:GetChildren() do
+		if child:IsA("Model") and child.Name:match("_Rescue$") then
+			-- ไม่ใช่ตัวเอง
+			if child ~= myBot then
+				-- ตรวจสอบว่าพังหรือไม่
+				local isDown = child:GetAttribute("IsDown")
+				if isDown == true and child.PrimaryPart then
+					local distance = (child.PrimaryPart.Position - myPosition).Magnitude
+					if distance < nearestDistance then
+						nearest = child
+						nearestDistance = distance
+					end
+				end
+			end
+		end
+	end
+
+	return nearest
+end
+
+-- เริ่มช่วยเหลือ
+local function startRevive()
+	if isReviving or not nearestDownedBot then
+		return
+	end
+
+	isReviving = true
+	holdStartTime = tick()
+
+	-- แสดง progress bar
+	if progressBg then
+		progressBg.Visible = true
+	end
+
+	print("[ReviveSystem] Started reviving", nearestDownedBot.Name)
+end
+
+-- หยุดช่วยเหลือ
+local function stopRevive(completed: boolean)
+	if not isReviving then
+		return
+	end
+
+	isReviving = false
+
+	-- ซ่อน progress bar
+	if progressBg then
+		progressBg.Visible = false
+	end
+
+	if completed and nearestDownedBot then
+		-- ส่ง request ไป server
+		reviveRemote:FireServer(nearestDownedBot)
+		print("[ReviveSystem] Revive completed for", nearestDownedBot.Name)
+	else
+		print("[ReviveSystem] Revive cancelled")
+	end
+
+	-- Reset progress bar
+	if progressFill then
+		progressFill.Size = UDim2.new(0, 0, 1, 0)
+	end
+
+	holdStartTime = 0
+end
+
+-- Input handling
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+
+	if input.KeyCode == REVIVE_KEY then
+		if nearestDownedBot and not isReviving then
+			startRevive()
+		end
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+	if input.KeyCode == REVIVE_KEY then
+		if isReviving then
+			local elapsed = tick() - holdStartTime
+			local completed = elapsed >= HOLD_DURATION
+			stopRevive(completed)
+		end
+	end
+end)
+
+-- Main loop - update UI และตรวจสอบระยะทาง
+heartbeatConnection = RunService.Heartbeat:Connect(function()
+	local myBot = workspace:FindFirstChild(player.Name .. "_Rescue")
+	if not myBot or not myBot.PrimaryPart then
+		-- ไม่มี RescueBot ลบ UI
+		if billboardGui then
+			billboardGui:Destroy()
+			billboardGui = nil
+		end
+		nearestDownedBot = nil
+		return
+	end
+
+	-- หา downed bot ใกล้ที่สุด
+	local foundBot = findNearestDownedBot()
+
+	-- ถ้าเปลี่ยน target
+	if foundBot ~= nearestDownedBot then
+		nearestDownedBot = foundBot
+
+		-- ลบ billboard เก่า
+		if billboardGui then
+			billboardGui:Destroy()
+			billboardGui = nil
+		end
+
+		-- สร้าง billboard ใหม่
+		if nearestDownedBot then
+			local billboard, bg = createBillboard(nearestDownedBot)
+			updateBillboardReferences(billboard, bg)
+		end
+
+		-- หยุด revive ถ้ากำลังทำอยู่
+		if isReviving then
+			stopRevive(false)
+		end
+	end
+
+	-- Update progress bar
+	if isReviving and progressFill then
+		local elapsed = tick() - holdStartTime
+		local progress = math.clamp(elapsed / HOLD_DURATION, 0, 1)
+		progressFill.Size = UDim2.new(progress, 0, 1, 0)
+
+		-- ถ้าครบเวลา
+		if progress >= 1 then
+			stopRevive(true)
+		end
+	end
+
+	-- ซ่อน billboard ถ้าไม่มี target
+	if billboardGui then
+		billboardGui.Enabled = nearestDownedBot ~= nil
+	end
+end)
+
+print("[ReviveSystem] Initialized")

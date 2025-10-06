@@ -17,8 +17,8 @@ local remoteEventNames = {
 	"UpdateHP",
 	"UpdateBattery",
 	"BotDeath",
-	"BotTimeout", -- เมื่อ HP = 0 และหมดเวลา 30 วินาที
 	"DebugModifyHP",
+	"ReviveTeammate", -- ช่วยเหลือเพื่อนที่พัง
 }
 
 for _, eventName in ipairs(remoteEventNames) do
@@ -28,6 +28,14 @@ for _, eventName in ipairs(remoteEventNames) do
 		remoteEvent.Parent = rescueBotRemotes
 		print(`[SetupRemotes] Created RemoteEvent: {eventName}`)
 	end
+end
+
+-- สร้าง BindableEvent สำหรับ server-to-server (BotTimeout)
+if not rescueBotRemotes:FindFirstChild("BotTimeout") then
+	local bindableEvent = Instance.new("BindableEvent")
+	bindableEvent.Name = "BotTimeout"
+	bindableEvent.Parent = rescueBotRemotes
+	print(`[SetupRemotes] Created BindableEvent: BotTimeout`)
 end
 
 print("[SetupRemotes] All RescueBot RemoteEvents are ready")

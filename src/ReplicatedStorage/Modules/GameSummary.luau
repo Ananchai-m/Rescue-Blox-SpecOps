@@ -41,7 +41,17 @@ function GameSummary.addCoins(player, amount)
 	if not playerStats[player.UserId] then
 		GameSummary.addPlayerScore(player, 0, 0)
 	end
-	playerStats[player.UserId].coins = playerStats[player.UserId].coins + (amount or 1)
+	local current = playerStats[player.UserId].coins or 0
+	local delta = amount or 1
+	playerStats[player.UserId].coins = math.max(0, current + delta)
+end
+
+function GameSummary.getCoins(player)
+	local stats = playerStats[player.UserId]
+	if not stats then
+		return 0
+	end
+	return stats.coins or 0
 end
 
 -- ฟังก์ชันเพิ่มผู้เล่นทุกคนเข้าสู่ summary (เรียกเมื่อเกมเริ่ม)

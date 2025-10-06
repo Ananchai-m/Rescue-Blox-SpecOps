@@ -4,13 +4,27 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
 
 local GameConfig = require(script.Parent.GameConfig)
+local GameSummary = require(script.Parent.GameSummary)
+
+local rescueRemotes = ReplicatedStorage:WaitForChild("RescueBotRemotes")
+local victimRescueRemote = rescueRemotes:WaitForChild("VictimRescue")
 
 local RescueBotHealth = {}
 RescueBotHealth.__index = RescueBotHealth
 
 type TimeoutCallback = (player: Player) -> ()
+
+local function getReviveSettings()
+	local settings = GameConfig.getRescueBotSettings()
+	local reviveSettings = settings.revive or {}
+	reviveSettings.sharePercent = math.clamp(reviveSettings.sharePercent or 0, 0, 1)
+	reviveSettings.maxDistance = reviveSettings.maxDistance or 15
+	reviveSettings.holdDuration = reviveSettings.holdDuration or 2
+	return reviveSettings
+end
 
 export type RescueBotHealthType = {
 	rescueModel: Model,
@@ -23,6 +37,9 @@ export type RescueBotHealthType = {
 	_lastBatteryUpdate: number?,
 	_isDead: boolean,
 	_crashEffect: Instance?,
+	_revivePrompt: ProximityPrompt?,
+	_revivePromptConnection: RBXScriptConnection?,
+	_reviveInProgress: boolean,
 	_callbacks: {
 		onTimeout: TimeoutCallback?,
 	}?,
@@ -40,6 +57,132 @@ export type RescueBotHealthType = {
 	_startBatteryDrain: (self: RescueBotHealthType) -> (),
 	_onDeath: (self: RescueBotHealthType) -> ()
 }
+
+local function getOwnerPlayer(typedSelf: RescueBotHealthType): Player?
+	local playerName = typedSelf.rescueModel.Name:gsub("_Rescue", "")
+	return Players:FindFirstChild(playerName)
+end
+
+local function clearRevivePrompt(typedSelf: RescueBotHealthType)
+	if typedSelf._revivePromptConnection then
+		typedSelf._revivePromptConnection:Disconnect()
+		typedSelf._revivePromptConnection = nil
+	end
+
+	if typedSelf._revivePrompt then
+		typedSelf._revivePrompt:Destroy()
+		typedSelf._revivePrompt = nil
+	end
+
+	typedSelf._reviveInProgress = false
+end
+
+local function handleReviveAttempt(typedSelf: RescueBotHealthType, rescuer: Player)
+	if not rescuer then return end
+	if not typedSelf._isDead then return end
+	if typedSelf._reviveInProgress then return end
+
+	local ownerPlayer = getOwnerPlayer(typedSelf)
+	if not ownerPlayer or ownerPlayer == rescuer then
+		return
+	end
+
+	local reviveSettings = getReviveSettings()
+	local primaryPart = typedSelf.rescueModel.PrimaryPart
+	local rescuerCharacter = rescuer.Character
+	local rescuerRoot = rescuerCharacter and rescuerCharacter:FindFirstChild("HumanoidRootPart")
+	if not (primaryPart and rescuerRoot and primaryPart:IsA("BasePart") and rescuerRoot:IsA("BasePart")) then
+		return
+	end
+	local typedPrimaryPart = primaryPart :: BasePart
+	local typedRescuerRoot = rescuerRoot :: BasePart
+
+	local rescuerRescue = workspace:FindFirstChild(rescuer.Name .. "_Rescue")
+	if rescuerRescue and rescuerRescue:GetAttribute("IsDown") then
+		return
+	end
+
+	local distance = (typedRescuerRoot.Position - typedPrimaryPart.Position).Magnitude
+	if distance > (reviveSettings.maxDistance or 15) then
+		return
+	end
+
+	typedSelf._reviveInProgress = true
+	if typedSelf._revivePrompt then
+		typedSelf._revivePrompt.Enabled = false
+	end
+
+	local sharePercent = reviveSettings.sharePercent or 0
+	local shareAmount = 0
+	if sharePercent > 0 then
+		local ownerCoins = GameSummary.getCoins(ownerPlayer)
+		if ownerCoins > 0 then
+			shareAmount = math.floor(ownerCoins * sharePercent)
+			if shareAmount < 1 and ownerCoins > 0 then
+				shareAmount = 1
+			end
+			if shareAmount > ownerCoins then
+				shareAmount = ownerCoins
+			end
+		end
+	end
+
+	if shareAmount > 0 then
+		GameSummary.addCoins(ownerPlayer, -shareAmount)
+		GameSummary.addCoins(rescuer, shareAmount)
+
+		if victimRescueRemote then
+			victimRescueRemote:FireClient(rescuer, "reviveReward", shareAmount)
+			victimRescueRemote:FireClient(ownerPlayer, "revivePenalty", shareAmount)
+		end
+	end
+
+	print(string.format("[RescueBotHealth] %s revived %s (+%d coins)", rescuer.Name, ownerPlayer.Name, shareAmount))
+
+	local success, err = pcall(function()
+		typedSelf:Heal(typedSelf.maxHP)
+	end)
+
+	if not success then
+		warn("[RescueBotHealth] Failed to heal after revive:", err)
+		if typedSelf._revivePrompt then
+			typedSelf._revivePrompt.Enabled = true
+		end
+	end
+
+	typedSelf._reviveInProgress = false
+end
+
+local function createRevivePrompt(typedSelf: RescueBotHealthType)
+	clearRevivePrompt(typedSelf)
+
+	local primaryPart = typedSelf.rescueModel.PrimaryPart
+	if not (primaryPart and primaryPart:IsA("BasePart")) then
+		return
+	end
+	local typedPrimaryPart = primaryPart :: BasePart
+
+	local reviveSettings = getReviveSettings()
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "RevivePrompt"
+	prompt.ActionText = "Revive Teammate"
+	prompt.ObjectText = "Downed Teammate"
+	prompt.KeyboardKeyCode = Enum.KeyCode.R
+	prompt.GamepadKeyCode = Enum.KeyCode.ButtonY
+	prompt.HoldDuration = reviveSettings.holdDuration or 5
+	prompt.MaxActivationDistance = reviveSettings.maxDistance or 15
+	prompt.RequiresLineOfSight = false
+	prompt.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
+	prompt.Enabled = true
+	prompt.Parent = typedPrimaryPart
+
+	print(`[RescueBotHealth] Created RevivePrompt on {typedSelf.rescueModel.Name} (HoldDuration: {prompt.HoldDuration}s, MaxDistance: {prompt.MaxActivationDistance})`)
+
+	typedSelf._revivePrompt = prompt
+	typedSelf._revivePromptConnection = prompt.Triggered:Connect(function(rescuer)
+		handleReviveAttempt(typedSelf, rescuer)
+	end)
+end
 
 -- สร้าง RescueBotHealth instance
 type ConstructorOptions = {
@@ -59,6 +202,11 @@ function RescueBotHealth.new(rescueModel: Model, options: ConstructorOptions?): 
 	self._connections = {}
 	self._isDead = false
 	self._crashEffect = nil
+	self._revivePrompt = nil
+	self._revivePromptConnection = nil
+	self._reviveInProgress = false
+
+	rescueModel:SetAttribute("IsDown", false)
 	self._callbacks = options and {
 		onTimeout = options.onTimeout,
 	} or nil
@@ -77,6 +225,26 @@ function RescueBotHealth.new(rescueModel: Model, options: ConstructorOptions?): 
 
 	-- Battery Drain (Idle)
 	self:_startBatteryDrain()
+
+	-- ตรวจสอบการ Revive ผ่าน Attribute
+	local attributeConnection = rescueModel:GetAttributeChangedSignal("IsDown"):Connect(function()
+		local isDown = rescueModel:GetAttribute("IsDown")
+		if isDown == false and self._isDead then
+			-- ถูก revive แล้ว
+			self:_onRevived()
+		end
+	end)
+	table.insert(self._connections, attributeConnection)
+
+	-- Sync HP จาก Attribute (สำหรับ server-side revive)
+	local hpConnection = rescueModel:GetAttributeChangedSignal("HP"):Connect(function()
+		local newHP = rescueModel:GetAttribute("HP")
+		if newHP and newHP > 0 and self._isDead then
+			self.currentHP = newHP
+			self._isDead = false
+		end
+	end)
+	table.insert(self._connections, hpConnection)
 
 	return self
 end
@@ -201,6 +369,8 @@ function RescueBotHealth:_onDeath()
 		typedSelf.rescueModel.PrimaryPart.Anchored = true
 	end
 
+	typedSelf.rescueModel:SetAttribute("IsDown", true)
+
 	-- เพิ่ม CrashEffect
 	local effectsFolder = ReplicatedStorage:FindFirstChild("Effects")
 	if effectsFolder then
@@ -220,6 +390,8 @@ function RescueBotHealth:_onDeath()
 			descendant.Enabled = false
 		end
 	end
+
+	-- ไม่ใช้ ProximityPrompt แล้ว ใช้ ReviveSystem.client.luau แทน
 
 	-- ส่ง event ไป client เพื่อแสดง popup รอช่วยเหลือ
 	local remoteEvents = ReplicatedStorage:FindFirstChild("RescueBotRemotes")
@@ -246,15 +418,52 @@ function RescueBotHealth:_onDeath()
 				if typedSelf.currentHP <= 0 and typedSelf._isDead then
 					botDeathEvent:FireClient(player, "timeout")
 
-					-- แจ้ง callback เพื่อให้ server จัดการ timeout flow
-					if typedSelf._callbacks and typedSelf._callbacks.onTimeout then
-						typedSelf._callbacks.onTimeout(player)
+					-- Fire BotTimeout event เพื่อให้ server handler จัดการ
+					local botTimeoutEvent = remoteEvents:FindFirstChild("BotTimeout")
+					if botTimeoutEvent and botTimeoutEvent:IsA("BindableEvent") then
+						botTimeoutEvent:Fire(player)
 					end
 
-					warn(`[RescueBotHealth] Player {player.Name} timeout - requesting summary`)
+					warn(`[RescueBotHealth] Player {player.Name} timeout - fired bindable event`)
 				end
 			end)
 		end
+	end
+end
+
+-- จัดการเมื่อถูก Revive
+function RescueBotHealth:_onRevived()
+	local typedSelf = self :: RescueBotHealthType
+
+	print(`[RescueBotHealth] {typedSelf.rescueModel.Name} has been revived!`)
+
+	-- Reset ค่า
+	typedSelf._isDead = false
+	typedSelf.rescueModel:SetAttribute("IsDown", false)
+
+	-- ยกเลิก Anchor
+	if typedSelf.rescueModel.PrimaryPart then
+		typedSelf.rescueModel.PrimaryPart.Anchored = false
+	end
+
+	-- ลบ CrashEffect
+	if typedSelf._crashEffect then
+		typedSelf._crashEffect:Destroy()
+		typedSelf._crashEffect = nil
+	end
+
+	-- เปิดใช้งาน ProximityPrompt กลับ
+	for _, descendant in ipairs(typedSelf.rescueModel:GetDescendants()) do
+		if descendant:IsA("ProximityPrompt") then
+			descendant.Enabled = true
+		elseif descendant:IsA("ClickDetector") then
+			descendant.MaxActivationDistance = 32
+		end
+	end
+
+	-- เริ่ม Battery Drain ใหม่ (ถ้าถูกหยุดไว้)
+	if not typedSelf._batteryDrainConnection then
+		typedSelf:_startBatteryDrain()
 	end
 end
 
@@ -267,6 +476,9 @@ function RescueBotHealth:Heal(amount: number)
 	-- ถ้าฟื้นจากตาย
 	if typedSelf._isDead and typedSelf.currentHP > 0 then
 		typedSelf._isDead = false
+		typedSelf.rescueModel:SetAttribute("IsDown", false)
+		clearRevivePrompt(typedSelf)
+		typedSelf._reviveInProgress = false
 
 		-- ปลดล็อคการเคลื่อนที่
 		if typedSelf.rescueModel.PrimaryPart then
@@ -352,6 +564,9 @@ function RescueBotHealth:Reset()
 	typedSelf.currentHP = typedSelf.maxHP
 	typedSelf.currentBattery = typedSelf.maxBattery
 	typedSelf._isDead = false
+	typedSelf.rescueModel:SetAttribute("IsDown", false)
+	clearRevivePrompt(typedSelf)
+	typedSelf._reviveInProgress = false
 
 	-- ลบ CrashEffect ถ้ามี
 	if typedSelf._crashEffect then
@@ -374,7 +589,6 @@ function RescueBotHealth:Reset()
 		local UpdateBattery = remoteEvents:FindFirstChild("UpdateBattery")
 
 		local playerName = typedSelf.rescueModel.Name:gsub("_Rescue", "")
-		local Players = game:GetService("Players")
 		local player = Players:FindFirstChild(playerName)
 
 		if player then
@@ -400,6 +614,8 @@ function RescueBotHealth:Destroy()
 	if self._batteryDrainConnection then
 		self._batteryDrainConnection:Disconnect()
 	end
+
+	clearRevivePrompt(self :: RescueBotHealthType)
 
 	table.clear(self)
 end

@@ -266,79 +266,83 @@ end
 
 -- ฟังก์ชันเพิ่ม coins พร้อม animation
 function GameTimer.addCoins(amount)
-	if timerGui then
-		local coinFrame = timerGui:FindFirstChild("CoinFrame")
-		if coinFrame then
-			local coinLabel = coinFrame:FindFirstChild("CoinLabel")
-			local coinIcon = coinFrame:FindFirstChild("CoinIcon")
-			if coinLabel and coinIcon then
-				local currentCount = tonumber(coinLabel.Text) or 0
-				local newCount = currentCount + amount
-				coinLabel.Text = tostring(newCount)
+	if not timerGui then return end
+	if not amount or amount == 0 then return end
 
-				local TweenService = game:GetService("TweenService")
+	local coinFrame = timerGui:FindFirstChild("CoinFrame")
+	if not coinFrame then return end
 
-				-- Animation สำหรับ coin icon ด้วย UIScale
-				local iconScale = coinIcon:FindFirstChild("CoinIconScale")
-				if not iconScale then
-					iconScale = Instance.new("UIScale")
-					iconScale.Name = "CoinIconScale"
-					iconScale.Scale = 1
-					iconScale.Parent = coinIcon
-				end
+	local coinLabel = coinFrame:FindFirstChild("CoinLabel")
+	local coinIcon = coinFrame:FindFirstChild("CoinIcon")
+	if not (coinLabel and coinIcon) then return end
 
-				local iconScaleUp = TweenService:Create(iconScale,
-					TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-					{Scale = 1.2}
-				)
-				local iconScaleDown = TweenService:Create(iconScale,
-					TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-					{Scale = 1}
-				)
+	local currentCount = tonumber(coinLabel.Text) or 0
+	local newCount = currentCount + amount
+	if newCount < 0 then
+		newCount = 0
+	end
 
-				iconScaleUp:Play()
-				iconScaleUp.Completed:Connect(function()
-					iconScaleDown:Play()
-				end)
+	local delta = newCount - currentCount
+	if delta == 0 then
+		return
+	end
 
-				-- Animation สำหรับ coin label ด้วย UIScale
-				local labelScale = coinLabel:FindFirstChild("CoinLabelScale")
-				if not labelScale then
-					labelScale = Instance.new("UIScale")
-					labelScale.Name = "CoinLabelScale"
-					labelScale.Scale = 1
-					labelScale.Parent = coinLabel
-				end
+	coinLabel.Text = tostring(newCount)
 
-				local labelScaleUp = TweenService:Create(labelScale,
-					TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-					{Scale = 1.3}
-				)
-				local labelScaleDown = TweenService:Create(labelScale,
-					TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-					{Scale = 1}
-				)
+	if delta > 0 then
+		local TweenService = game:GetService("TweenService")
 
-				labelScaleUp:Play()
-				labelScaleUp.Completed:Connect(function()
-					labelScaleDown:Play()
-				end)
-
-				-- Text color flash
-				local flashInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-				local flashTween = TweenService:Create(coinLabel, flashInfo, {
-					TextColor3 = Color3.fromRGB(255, 255, 255)
-				})
-				flashTween:Play()
-
-				flashTween.Completed:Connect(function()
-					local returnTween = TweenService:Create(coinLabel, flashInfo, {
-						TextColor3 = Color3.fromRGB(255, 215, 0)
-					})
-					returnTween:Play()
-				end)
-			end
+		local iconScale = coinIcon:FindFirstChild("CoinIconScale")
+		if not iconScale then
+			iconScale = Instance.new("UIScale")
+			iconScale.Name = "CoinIconScale"
+			iconScale.Scale = 1
+			iconScale.Parent = coinIcon
 		end
+
+		local iconScaleUp = TweenService:Create(iconScale,
+			TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{Scale = 1.2}
+		)
+		local iconScaleDown = TweenService:Create(iconScale,
+			TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{Scale = 1}
+		)
+
+		iconScaleUp:Play()
+		iconScaleUp.Completed:Connect(function()
+			iconScaleDown:Play()
+		end)
+
+		local labelScale = coinLabel:FindFirstChild("CoinLabelScale")
+		if not labelScale then
+			labelScale = Instance.new("UIScale")
+			labelScale.Name = "CoinLabelScale"
+			labelScale.Scale = 1
+			labelScale.Parent = coinLabel
+		end
+
+		local labelScaleUp = TweenService:Create(labelScale,
+			TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{Scale = 1.3}
+		)
+		local labelScaleDown = TweenService:Create(labelScale,
+			TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{Scale = 1}
+		)
+
+		labelScaleUp:Play()
+		labelScaleUp.Completed:Connect(function()
+			labelScaleDown:Play()
+		end)
+	else
+		local originalColor = Color3.fromRGB(255, 215, 0)
+		coinLabel.TextColor3 = Color3.fromRGB(255, 85, 85)
+		task.delay(0.35, function()
+			if coinLabel and coinLabel.Parent then
+				coinLabel.TextColor3 = originalColor
+			end
+		end)
 	end
 end
 

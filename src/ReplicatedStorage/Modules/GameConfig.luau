@@ -95,6 +95,11 @@ GameConfig.RESCUE_BOT = {
 	regeneration = {
 		hpPerSecond = 0,      -- ไม่ฟื้นเลือด
 		batteryPerSecond = 0  -- ไม่ชาร์จเอง
+	},
+	revive = {
+		sharePercent = 0.3,   -- เปอร์เซ็นต์ coins ที่แบ่งให้ผู้ช่วย
+		maxDistance = 15,     -- ระยะสูงสุดในการ revive เพื่อน (studs)
+		holdDuration = 5      -- เวลากดค้างเพื่อ revive (วินาที)
 	}
 }
 

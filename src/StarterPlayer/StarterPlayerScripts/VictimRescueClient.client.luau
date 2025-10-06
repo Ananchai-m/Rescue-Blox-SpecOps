@@ -141,6 +141,31 @@ local function showRescueNotification(rescueCount)
 end
 
 -- Handle rescue events from server
+
+local function showReviveNotification(text)
+	local screenGui = playerGui:FindFirstChild("GameTimerGui")
+	if not screenGui then return end
+
+	local notification = Instance.new("TextLabel")
+	notification.Name = "ReviveNotification"
+	notification.Size = UDim2.new(0.3, 0, 0.06, 0)
+	notification.Position = UDim2.new(0.35, 0, 0.22, 0)
+	notification.BackgroundTransparency = 1
+	notification.Text = text
+	notification.TextColor3 = Color3.fromRGB(255, 255, 255)
+	notification.Font = Enum.Font.GothamBold
+	notification.TextScaled = true
+	notification.TextStrokeTransparency = 0.25
+	notification.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	notification.Parent = screenGui
+
+	task.delay(2, function()
+		if notification.Parent then
+			notification:Destroy()
+		end
+	end)
+end
+
 rescueRemote.OnClientEvent:Connect(function(action, data, position)
 	if action == "coinCollected" then
 		-- Use new CoinEffect system
@@ -152,6 +177,26 @@ rescueRemote.OnClientEvent:Connect(function(action, data, position)
 	elseif action == "victimRescued" then
 		local rescueCount = data
 		showRescueNotification(rescueCount)
+	elseif action == "reviveReward" then
+		local rewardAmount = 0
+		if typeof(data) == "number" then
+			rewardAmount = data
+		elseif typeof(data) == "table" then
+			rewardAmount = tonumber(data.amount) or 0
+		end
+
+		rewardAmount = math.floor(rewardAmount)
+		if rewardAmount > 0 then
+			GameTimer.addCoins(rewardAmount)
+			showReviveNotification(string.format("Revived teammate! +%d", rewardAmount))
+		end
+	elseif action == "revivePenalty" then
+		local penalty = tonumber(data) or 0
+		penalty = math.floor(penalty)
+		if penalty > 0 then
+			GameTimer.addCoins(-penalty)
+			showReviveNotification(string.format("Revived by friend -%d", penalty))
+		end
 	end
 end)
 
