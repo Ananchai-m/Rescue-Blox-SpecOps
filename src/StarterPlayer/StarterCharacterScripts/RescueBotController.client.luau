@@ -16,6 +16,7 @@ local SpawnPointManager = require(ReplicatedStorage.Modules.SpawnPointManager)
 local CameraSystem = require(ReplicatedStorage.Modules.CameraSystem)
 local VehicleController = require(ReplicatedStorage.Modules.VehicleController)
 local GameConfig = require(ReplicatedStorage.Modules.GameConfig)
+local ShopUI = require(ReplicatedStorage.Modules.ShopUI)
 
 -- รอ RemoteEvents
 local remoteEvents = ReplicatedStorage:WaitForChild("RescueBotRemotes")
@@ -58,6 +59,7 @@ local flipSurfaceGui = nil
 
 -- Client-side waiting system variables
 local currentWaitingCount = 0
+local unregisterVotingComplete = nil
 
 -- ระบบ Rescue Mode แบบเดิม (จัดการโดย VehicleController แล้ว)
 
@@ -122,6 +124,28 @@ local function disconnectAll()
 
 	-- ล้าง wheel state ใน VehicleController
 	VehicleController.clearWheelState()
+end
+
+local function freezePlayerForRescue()
+	local currentCharacter = player.Character or character
+	if not currentCharacter then
+		return
+	end
+
+	local currentHumanoid = currentCharacter:FindFirstChildOfClass("Humanoid")
+	if not currentHumanoid then
+		return
+	end
+
+	currentHumanoid.PlatformStand = true
+	currentHumanoid.Sit = false
+
+	local primaryPart = currentCharacter.PrimaryPart
+	if primaryPart then
+		primaryPart.Anchored = true
+	end
+
+	print("Player frozen after Map Selection - preparing to spawn rescue vehicle")
 end
 
 -- Vehicle functions ถูกย้ายไป VehicleController module แล้ว
@@ -686,6 +710,8 @@ function startOriginalRescueMode()
 		return
 	end
 
+	DrillSystem.setDrillEnabled(true)
+
 	-- เก็บใน VehicleController
 	VehicleController.setOriginalRescueModel(originalRescueModel)
 
@@ -1070,27 +1096,43 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 			end
 
 			print("Starting map selection...")
-			-- เริ่ม Map Selection สำหรับ player คนนี้เท่านั้น (client-side)
-			-- ส่งเฉพาะ local player เพราะแต่ละ client ทำ map selection แยกกัน
-			MapSelectionSystem.startVoting({player})
+			ShopUI.closeShop()
+			ShopUI.setButtonVisible(false)
 
-			-- รอให้ countdown + Map Selection เสร็จ แล้วจึง freeze และเริ่มเกม
-			wait(19) -- รอให้ Map Selection 15s + result 3s + buffer = 19s
-
-			-- Freeze ผู้เล่นหลังจาก Map Selection เสร็จ
-			if character and character:FindFirstChild("Humanoid") then
-				character.Humanoid.PlatformStand = true
-				if character.PrimaryPart then
-					character.PrimaryPart.Anchored = true
+			local function cleanupVotingCallback()
+				if unregisterVotingComplete then
+					unregisterVotingComplete()
+					unregisterVotingComplete = nil
 				end
-				print("Player frozen after Map Selection - preparing to spawn rescue vehicle")
 			end
 
-			wait(2) -- buffer เพิ่มอีกนิด
-			startOriginalRescueMode() -- บังคับ Rescue Model แบบเดิม
+			local function handleVotingFinished()
+				cleanupVotingCallback()
+				freezePlayerForRescue()
+				task.delay(2, startOriginalRescueMode)
+			end
+
+			cleanupVotingCallback()
+			unregisterVotingComplete = MapSelectionSystem.onVotingComplete(function()
+				handleVotingFinished()
+			end)
+
+			-- เริ่ม Map Selection สำหรับ player คนนี้เท่านั้น (client-side)
+			-- ส่งเฉพาะ local player เพราะแต่ละ client ทำ map selection แยกกัน
+			local startedVoting = MapSelectionSystem.startVoting({player})
+			if not startedVoting then
+				warn("[RescueBotController] Failed to start map voting - freezing immediately")
+				handleVotingFinished()
+			end
 		end)
 	elseif action == "returnToLobby" then
 		print("Returning to lobby after game summary")
+
+		if unregisterVotingComplete then
+			unregisterVotingComplete()
+			unregisterVotingComplete = nil
+		end
+		ShopUI.setButtonVisible(true)
 
 		-- ล้างสถานะเกมทั้งหมด
 		playerInGame = false
@@ -1137,10 +1179,27 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 
 		print("Successfully returned to lobby with new companion - ready for next game")
 
+		local simu = workspace:FindFirstChild("Simu")
+		if simu and simu:FindFirstChild("Attachment") then
+			local billboardGui = simu.Attachment:FindFirstChild("BillboardGui")
+			if billboardGui and billboardGui:FindFirstChild("Frame") then
+				local textLabel = billboardGui.Frame:FindFirstChild("TextLabel")
+				if textLabel then
+					textLabel.Text = "Please join the mission!"
+					textLabel.Visible = true
+				end
+			end
+		end
+
 	elseif action == "gameEnded" then
 		print("Game ended - can join new game")
 		-- รีเซ็ตสถานะ
 		playerInGame = false
+		if unregisterVotingComplete then
+			unregisterVotingComplete()
+			unregisterVotingComplete = nil
+		end
+		ShopUI.setButtonVisible(true)
 	end
 end)
 

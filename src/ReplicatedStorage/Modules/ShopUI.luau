@@ -70,6 +70,23 @@ local function createShopButton()
 	return shopButton
 end
 
+local function ensureShopButton(): TextButton?
+	if shopButton and shopButton.Parent then
+		return shopButton
+	end
+
+	local existingGui = playerGui:FindFirstChild("ShopButtonGui")
+	if existingGui and existingGui:IsA("ScreenGui") then
+		local existingButton = existingGui:FindFirstChild("ShopButton")
+		if existingButton and existingButton:IsA("TextButton") then
+			shopButton = existingButton
+			return shopButton
+		end
+	end
+
+	return createShopButton()
+end
+
 -- ฟังก์ชันสร้าง Shop UI
 local function createShopUI()
 	if shopScreenGui then return shopScreenGui end
@@ -496,7 +513,7 @@ end
 -- ฟังก์ชัน Initialize Shop
 function ShopUI.init()
 	-- สร้างปุ่ม Shop
-	local button = createShopButton()
+	local button = ensureShopButton()
 
 	-- เชื่อมปุ่มกับการเปิด Shop
 	button.MouseButton1Click:Connect(function()
@@ -547,6 +564,25 @@ function ShopUI.init()
 	})
 
 	print("ShopUI initialized")
+end
+
+function ShopUI.setButtonVisible(isVisible: boolean)
+	local button = ensureShopButton()
+	if button then
+		button.Visible = isVisible
+		local buttonParent = button.Parent
+		if buttonParent and buttonParent:IsA("ScreenGui") then
+			buttonParent.Enabled = isVisible
+		end
+	end
+
+	if not isVisible then
+		if shopScreenGui then
+			shopScreenGui.Enabled = false
+		end
+		isShopOpen = false
+		isAnimating = false
+	end
 end
 
 return ShopUI

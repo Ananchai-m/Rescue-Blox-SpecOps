@@ -45,6 +45,7 @@ local gameTimerRemote = getOrCreateRemote("GameTimer")
 local toggleDrillModeRemote = getOrCreateRemote("ToggleDrillMode")
 local updateHPRemote = getOrCreateRemote("UpdateHP")
 local updateBatteryRemote = getOrCreateRemote("UpdateBattery")
+local debugModifyHPRemote = getOrCreateRemote("DebugModifyHP")
 local CompanionFollower = require(script.Parent:WaitForChild("CompanionFollower"))
 
 -- Import VictimSpawner, GameConfig, GameSummary, and RescueBotHealth
@@ -88,6 +89,82 @@ local rescueBotHealthInstances = {} -- เก็บ RescueBotHealth instances
 -- Server-side Waiting System variables
 local waitingPlayers = {}
 local isGamePlaying = false
+
+local function handleRescueBotTimeout(player)
+	if not player then
+		return
+	end
+
+	if isGamePlaying then
+		isGamePlaying = false
+		waitingSystemRemote:FireAllClients("gameEnded")
+	end
+
+	local originalCallback = GameSummary.onSummaryClosed
+
+	GameSummary.onSummaryClosed = function(closedPlayer)
+		if closedPlayer == player then
+			GameSummary.resetToLobby(player)
+			GameSummary.onSummaryClosed = originalCallback
+		elseif originalCallback then
+			originalCallback(closedPlayer)
+		end
+	end
+
+	GameSummary.showSummary(player)
+end
+
+local function isAuthorizedDebugPlayer(player)
+	if not player then
+		return false
+	end
+
+	local success, result = pcall(GameConfig.isDebugUser, player.UserId)
+	if success then
+		return result == true
+	end
+
+	return false
+end
+
+local function handleDebugModifyHP(player, action, value)
+	if not isAuthorizedDebugPlayer(player) then
+		warn("[DebugModifyHP] Unauthorized attempt", player and player.Name or "Unknown")
+		return
+	end
+
+	local healthInstance = rescueBotHealthInstances[player]
+	if not healthInstance then
+		warn("[DebugModifyHP] No RescueBotHealth for player", player.Name)
+		return
+	end
+
+	local currentHP, maxHP = healthInstance:GetHP()
+	local actionKind = typeof(action) == "string" and string.lower(action) or ""
+
+	if actionKind == "kill" then
+		if currentHP > 0 then
+			healthInstance:TakeDamage(currentHP, "DebugKill")
+		end
+	elseif actionKind == "damage" then
+		local damageAmount = tonumber(value)
+		if damageAmount and damageAmount > 0 then
+			healthInstance:TakeDamage(damageAmount, "DebugDamage")
+		end
+	elseif actionKind == "set" then
+		local targetHP = tonumber(value)
+		if targetHP then
+			targetHP = math.clamp(targetHP, 0, maxHP)
+			if targetHP < currentHP then
+				healthInstance:TakeDamage(currentHP - targetHP, "DebugSetHP")
+			elseif targetHP > currentHP then
+				healthInstance:Heal(targetHP - currentHP)
+			end
+		end
+	end
+end
+
+debugModifyHPRemote.OnServerEvent:Connect(handleDebugModifyHP)
 
 -- Server-side Map Voting variables
 local currentVotes = {} -- {mapName = count}
@@ -873,7 +950,9 @@ spawnOriginalRescueEvent.OnServerEvent:Connect(function(player, position)
 	playerOriginalRescue[player] = originalRescueModel
 
 	-- สร้าง RescueBotHealth instance
-	local healthInstance = RescueBotHealth.new(originalRescueModel)
+	local healthInstance = RescueBotHealth.new(originalRescueModel, {
+		onTimeout = handleRescueBotTimeout,
+	})
 	rescueBotHealthInstances[player] = healthInstance
 	print("[RescueBotServer] Created RescueBotHealth for", player.Name)
 

@@ -15,6 +15,26 @@ local votingTimer = GameConfig.MAP_SELECTION.votingTime
 local currentVotes = {}
 local votingPlayers = {}
 local mapSelectionGui = nil
+local votingCompleteCallbacks = {}
+
+local function dispatchVotingComplete(mapIndex, mapData)
+	print("Map voting completed:")
+	if mapData then
+		print("- Selected map:", mapData.name)
+	end
+
+	local callbacksCopy = {}
+	for index, callback in ipairs(votingCompleteCallbacks) do
+		callbacksCopy[index] = callback
+	end
+
+	for _, callback in ipairs(callbacksCopy) do
+		local success, err = pcall(callback, mapIndex, mapData)
+		if not success then
+			warn("[MapSelectionSystem] onVotingComplete callback error:", err)
+		end
+	end
+end
 
 -- ข้อมูล Map ทั้งหมด
 local maps = {
@@ -425,7 +445,7 @@ function MapSelectionSystem.startVoting(players)
 		end
 
 		-- ส่งผลลัพธ์ (ไม่ต้องส่ง spawn assignments เพราะ server จัดการแล้ว)
-		MapSelectionSystem.onVotingComplete(winningMapIndex, winningMapData)
+		dispatchVotingComplete(winningMapIndex, winningMapData)
 
 		-- ล้าง UI จากทุก player
 		for _, player in ipairs(players) do
@@ -444,11 +464,21 @@ function MapSelectionSystem.startVoting(players)
 end
 
 -- ฟังก์ชัน callback สำหรับเมื่อโหวดเสร็จ (ให้ระบบอื่นเรียกใช้)
-function MapSelectionSystem.onVotingComplete(mapIndex, mapData)
-	-- ฟังก์ชันนี้จะถูกเรียกเมื่อการโหวดเสร็จสิ้น
-	print("Map voting completed:")
-	print("- Selected map:", mapData.name)
-	-- Spawn assignments ถูกจัดการที่ server แล้ว
+function MapSelectionSystem.onVotingComplete(callback)
+	if typeof(callback) ~= "function" then
+		error("MapSelectionSystem.onVotingComplete expects a function callback")
+	end
+
+	table.insert(votingCompleteCallbacks, callback)
+
+	return function()
+		for index = #votingCompleteCallbacks, 1, -1 do
+			if votingCompleteCallbacks[index] == callback then
+				table.remove(votingCompleteCallbacks, index)
+				break
+			end
+		end
+	end
 end
 
 -- ฟังก์ชันโหวดสำหรับ Map

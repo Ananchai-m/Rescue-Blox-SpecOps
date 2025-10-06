@@ -10,6 +10,8 @@ local GameConfig = require(script.Parent.GameConfig)
 local RescueBotHealth = {}
 RescueBotHealth.__index = RescueBotHealth
 
+type TimeoutCallback = (player: Player) -> ()
+
 export type RescueBotHealthType = {
 	rescueModel: Model,
 	currentHP: number,
@@ -19,6 +21,11 @@ export type RescueBotHealthType = {
 	_connections: { RBXScriptConnection },
 	_batteryDrainConnection: RBXScriptConnection?,
 	_lastBatteryUpdate: number?,
+	_isDead: boolean,
+	_crashEffect: Instance?,
+	_callbacks: {
+		onTimeout: TimeoutCallback?,
+	}?,
 
 	TakeDamage: (self: RescueBotHealthType, damage: number, damageType: string?) -> (),
 	Heal: (self: RescueBotHealthType, amount: number) -> (),
@@ -30,11 +37,16 @@ export type RescueBotHealthType = {
 	Destroy: (self: RescueBotHealthType) -> (),
 	_setupCollisionDetection: (self: RescueBotHealthType) -> (),
 	_setupRockDetection: (self: RescueBotHealthType) -> (),
-	_startBatteryDrain: (self: RescueBotHealthType) -> ()
+	_startBatteryDrain: (self: RescueBotHealthType) -> (),
+	_onDeath: (self: RescueBotHealthType) -> ()
 }
 
 -- สร้าง RescueBotHealth instance
-function RescueBotHealth.new(rescueModel: Model): RescueBotHealthType
+type ConstructorOptions = {
+	onTimeout: TimeoutCallback?,
+}
+
+function RescueBotHealth.new(rescueModel: Model, options: ConstructorOptions?): RescueBotHealthType
 	local self = setmetatable({}, RescueBotHealth) :: any
 
 	local botSettings = GameConfig.getRescueBotSettings()
@@ -45,6 +57,11 @@ function RescueBotHealth.new(rescueModel: Model): RescueBotHealthType
 	self.currentBattery = botSettings.maxBattery
 	self.maxBattery = botSettings.maxBattery
 	self._connections = {}
+	self._isDead = false
+	self._crashEffect = nil
+	self._callbacks = options and {
+		onTimeout = options.onTimeout,
+	} or nil
 
 	-- เก็บ HP/Battery ใน Attributes
 	rescueModel:SetAttribute("HP", self.currentHP)
@@ -66,49 +83,48 @@ end
 
 -- ตั้งค่าตรวจจับการชนและหิน (รวมกันเพื่อลด lag)
 function RescueBotHealth:_setupCollisionDetection()
-	if not self.rescueModel.PrimaryPart then return end
+	local typedSelf = self :: RescueBotHealthType
+	local primaryPart = typedSelf.rescueModel.PrimaryPart
+	if not primaryPart then return end
 
-	local primaryPart = self.rescueModel.PrimaryPart
 	local lastCollisionTime = 0
 	local hitParts = {} -- เก็บ parts ที่โดนแล้ว
 	local COLLISION_COOLDOWN = 1.0 -- วินาที
 
-	local connection = primaryPart.Touched:Connect(function(hit)
-		if not hit or not hit.Parent then return end
-		if hit:IsDescendantOf(self.rescueModel) then return end -- ข้าม part ของตัวเอง
+	local connection = primaryPart.Touched:Connect(function(hit: BasePart)
+		if not hit.Parent then return end
+		if hit:IsDescendantOf(typedSelf.rescueModel) then return end -- ข้าม part ของตัวเอง
 
 		local currentTime = tick()
 
 		-- ป้องกันโดนซ้ำจาก part เดิม
-		if hitParts[hit] and currentTime - hitParts[hit] < 2 then
+		local lastHitTime = hitParts[hit]
+		if lastHitTime and currentTime - lastHitTime < 2 then
 			return
 		end
 
 		local hitVelocity = hit.AssemblyLinearVelocity.Magnitude
 		local selfVelocity = primaryPart.AssemblyLinearVelocity.Magnitude
+		local hitMass = hit.AssemblyMass
 
 		-- ตรวจจับหินกระเด็น/หล่น (part อื่นมี velocity สูง)
-		if hitVelocity > 80 then
-			-- หินหล่นทับ
-			self:TakeDamage(GameConfig.getRescueBotSettings().damage.rockFalling, "Rock Falling")
-			hitParts[hit] = currentTime
-		elseif hitVelocity > 30 then
-			-- หินกระเด็น
-			self:TakeDamage(GameConfig.getRescueBotSettings().damage.rockBounce, "Rock Bounce")
+		if hitVelocity > 10 then
+			local impactForce = hitMass * hitVelocity
+			local damage = math.clamp(impactForce / 100, 1, 50) -- หาร 100 เพื่อให้ damage พอดี, สูงสุด 50 HP
+			local damageType = hitVelocity > 80 and "Rock Falling (Heavy)" or "Rock Impact"
+			typedSelf:TakeDamage(damage, damageType)
 			hitParts[hit] = currentTime
 		-- ตรวจจับการชนปกติ (ตัวเองมี velocity สูง)
 		elseif selfVelocity > 50 and currentTime - lastCollisionTime >= COLLISION_COOLDOWN then
-			-- ชนแรง
-			self:TakeDamage(GameConfig.getRescueBotSettings().damage.heavyCollision, "Heavy Collision")
+			typedSelf:TakeDamage(GameConfig.getRescueBotSettings().damage.heavyCollision, "Heavy Collision")
 			lastCollisionTime = currentTime
 		elseif selfVelocity > 20 and currentTime - lastCollisionTime >= COLLISION_COOLDOWN then
-			-- ชนเบา
-			self:TakeDamage(GameConfig.getRescueBotSettings().damage.collision, "Collision")
+			typedSelf:TakeDamage(GameConfig.getRescueBotSettings().damage.collision, "Collision")
 			lastCollisionTime = currentTime
 		end
 	end)
 
-	table.insert(self._connections, connection)
+	table.insert(typedSelf._connections, connection)
 end
 
 -- ตั้งค่าตรวจจับหินที่ตก/กระเด็น (ใช้ connection เดียวกับ collision เพื่อลด lag)
@@ -163,9 +179,82 @@ function RescueBotHealth:TakeDamage(damage: number, damageType: string?)
 	end
 
 	-- ถ้า HP หมด
-	if typedSelf.currentHP <= 0 then
+	if typedSelf.currentHP <= 0 and not typedSelf._isDead then
+		typedSelf._isDead = true
 		warn(`[RescueBotHealth] RescueBot DESTROYED!`)
-		-- TODO: ทำลาย RescueBot หรือ respawn
+		typedSelf:_onDeath()
+	end
+end
+
+-- จัดการเมื่อ RescueBot ตาย
+function RescueBotHealth:_onDeath()
+	local typedSelf = self :: RescueBotHealthType
+
+	-- หยุด Battery Drain
+	if typedSelf._batteryDrainConnection then
+		typedSelf._batteryDrainConnection:Disconnect()
+		typedSelf._batteryDrainConnection = nil
+	end
+
+	-- ล็อคการเคลื่อนที่ (anchored)
+	if typedSelf.rescueModel.PrimaryPart then
+		typedSelf.rescueModel.PrimaryPart.Anchored = true
+	end
+
+	-- เพิ่ม CrashEffect
+	local effectsFolder = ReplicatedStorage:FindFirstChild("Effects")
+	if effectsFolder then
+		local crashEffectTemplate = effectsFolder:FindFirstChild("CrashEffect")
+		if crashEffectTemplate and typedSelf.rescueModel.PrimaryPart then
+			local crashEffect = crashEffectTemplate:Clone()
+			crashEffect.Parent = typedSelf.rescueModel.PrimaryPart
+			typedSelf._crashEffect = crashEffect
+		end
+	end
+
+	-- ปิดใช้งาน ClickDetector/ProximityPrompt ทั้งหมดใน RescueBot
+	for _, descendant in ipairs(typedSelf.rescueModel:GetDescendants()) do
+		if descendant:IsA("ClickDetector") then
+			descendant.MaxActivationDistance = 0
+		elseif descendant:IsA("ProximityPrompt") then
+			descendant.Enabled = false
+		end
+	end
+
+	-- ส่ง event ไป client เพื่อแสดง popup รอช่วยเหลือ
+	local remoteEvents = ReplicatedStorage:FindFirstChild("RescueBotRemotes")
+	if remoteEvents then
+		local botDeathEvent = remoteEvents:FindFirstChild("BotDeath")
+		if not botDeathEvent then
+			botDeathEvent = Instance.new("RemoteEvent")
+			botDeathEvent.Name = "BotDeath"
+			botDeathEvent.Parent = remoteEvents
+		end
+
+		-- หา player owner
+		local playerName = typedSelf.rescueModel.Name:gsub("_Rescue", "")
+		local Players = game:GetService("Players")
+		local player = Players:FindFirstChild(playerName)
+
+		if player then
+			-- ส่งสัญญาณตายและซ่อน DrillProgressGui
+			botDeathEvent:FireClient(player, "died")
+
+			-- เริ่มนับถอยหลัง 30 วินาที
+			task.delay(30, function()
+				-- ถ้ายังไม่ฟื้น (HP ยังเป็น 0) ให้สรุปคะแนน
+				if typedSelf.currentHP <= 0 and typedSelf._isDead then
+					botDeathEvent:FireClient(player, "timeout")
+
+					-- แจ้ง callback เพื่อให้ server จัดการ timeout flow
+					if typedSelf._callbacks and typedSelf._callbacks.onTimeout then
+						typedSelf._callbacks.onTimeout(player)
+					end
+
+					warn(`[RescueBotHealth] Player {player.Name} timeout - requesting summary`)
+				end
+			end)
+		end
 	end
 end
 
@@ -174,6 +263,42 @@ function RescueBotHealth:Heal(amount: number)
 	local typedSelf = self :: RescueBotHealthType
 	typedSelf.currentHP = math.min(typedSelf.maxHP, typedSelf.currentHP + amount)
 	typedSelf.rescueModel:SetAttribute("HP", typedSelf.currentHP)
+
+	-- ถ้าฟื้นจากตาย
+	if typedSelf._isDead and typedSelf.currentHP > 0 then
+		typedSelf._isDead = false
+
+		-- ปลดล็อคการเคลื่อนที่
+		if typedSelf.rescueModel.PrimaryPart then
+			typedSelf.rescueModel.PrimaryPart.Anchored = false
+		end
+
+		-- ลบ CrashEffect
+		if typedSelf._crashEffect then
+			typedSelf._crashEffect:Destroy()
+			typedSelf._crashEffect = nil
+		end
+
+		-- เริ่ม Battery Drain ใหม่
+		typedSelf:_startBatteryDrain()
+
+		-- ส่ง event บอก client ว่าฟื้นแล้ว
+		local remoteEvents = ReplicatedStorage:FindFirstChild("RescueBotRemotes")
+		if remoteEvents then
+			local botDeathEvent = remoteEvents:FindFirstChild("BotDeath")
+			if botDeathEvent then
+				local playerName = typedSelf.rescueModel.Name:gsub("_Rescue", "")
+				local Players = game:GetService("Players")
+				local player = Players:FindFirstChild(playerName)
+
+				if player then
+					botDeathEvent:FireClient(player, "revived")
+				end
+			end
+		end
+
+		warn(`[RescueBotHealth] RescueBot REVIVED!`)
+	end
 end
 
 -- ใช้แบตเตอรี่
@@ -226,6 +351,18 @@ function RescueBotHealth:Reset()
 	local typedSelf = self :: RescueBotHealthType
 	typedSelf.currentHP = typedSelf.maxHP
 	typedSelf.currentBattery = typedSelf.maxBattery
+	typedSelf._isDead = false
+
+	-- ลบ CrashEffect ถ้ามี
+	if typedSelf._crashEffect then
+		typedSelf._crashEffect:Destroy()
+		typedSelf._crashEffect = nil
+	end
+
+	-- ปลดล็อคการเคลื่อนที่
+	if typedSelf.rescueModel.PrimaryPart then
+		typedSelf.rescueModel.PrimaryPart.Anchored = false
+	end
 
 	typedSelf.rescueModel:SetAttribute("HP", typedSelf.currentHP)
 	typedSelf.rescueModel:SetAttribute("Battery", typedSelf.currentBattery)

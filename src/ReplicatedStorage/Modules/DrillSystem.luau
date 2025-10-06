@@ -16,6 +16,12 @@ local currentDrillingPart = nil -- Part ที่กำลังเจาะอ�
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local drillEffectStopTimer = nil -- Timer สำหรับหยุด effect
+local playerGui = player:WaitForChild("PlayerGui")
+local isSummaryOpen = false
+local canDrill = true
+
+local rescueRemotes = ReplicatedStorage:WaitForChild("RescueBotRemotes")
+local botDeathRemote = rescueRemotes:WaitForChild("BotDeath")
 
 -- UI Variables
 local drillGui = nil
@@ -35,9 +41,25 @@ local function cancelDrillHideThread()
 	end
 end
 
+local function destroyDrillGui()
+	cancelDrillHideThread()
+	if drillGui then
+		drillGui:Destroy()
+	end
+
+	drillGui = nil
+	drillContainer = nil
+	drillPartLabel = nil
+	drillStatusLabel = nil
+	drillProgressBar = nil
+	drillProgressFill = nil
+end
+
 local function ensureDrillProgressGui()
 	-- ตรวจสอบว่ามี GUI อยู่แล้วและยังอยู่ใน PlayerGui หรือไม่
-	local playerGui = player:WaitForChild("PlayerGui")
+	if isSummaryOpen or not canDrill then
+		return
+	end
 	if drillGui and drillGui.Parent == playerGui then
 		return
 	end
@@ -539,6 +561,34 @@ function DrillSystem.clearOldDrillingData()
 	print("Cleared old drilling data and recently completed list")
 end
 
+function DrillSystem.clearProgressGui()
+	destroyDrillGui()
+end
+
+if playerGui then
+	playerGui.ChildAdded:Connect(function(child)
+		if child.Name == "GameSummaryGui" then
+			isSummaryOpen = true
+			canDrill = false
+			destroyDrillGui()
+		end
+	end)
+
+	playerGui.ChildRemoved:Connect(function(child)
+		if child.Name == "GameSummaryGui" then
+			isSummaryOpen = false
+		end
+	end)
+end
+
+botDeathRemote.OnClientEvent:Connect(function(status)
+	if status == "died" or status == "timeout" then
+		DrillSystem.setDrillEnabled(false)
+	elseif status == "revived" then
+		DrillSystem.setDrillEnabled(true)
+	end
+end)
+
 -- ฟังก์ชันหา Part ที่ชนกับ DrillArm.PrimaryPart
 local function findPartAtDrillArm()
 	-- หา DrillArm Model ของผู้เล่น
@@ -655,6 +705,10 @@ local function findPartAtDrillArm()
 end
 
 function DrillSystem.handleDrillingClick(clickPosition)
+	if not canDrill then
+		return false
+	end
+
 	-- หา DrillArm.PrimaryPart เพื่อเล่นเสียงเจาะ
 	local rescueModelName = player.Name .. "_Rescue"
 	local rescueModel = workspace:FindFirstChild(rescueModelName)
@@ -716,7 +770,20 @@ function DrillSystem.hideDrillProgress()
 end
 
 function DrillSystem.showDrillProgress(payload)
+	if not canDrill then
+		destroyDrillGui()
+		return
+	end
+
 	showDrillProgress(payload)
+end
+
+function DrillSystem.setDrillEnabled(isEnabled: boolean)
+	canDrill = isEnabled
+	if not canDrill then
+		disableDrillEffects()
+		destroyDrillGui()
+	end
 end
 
 -- ===== DISTANCE CHECK SYSTEM =====

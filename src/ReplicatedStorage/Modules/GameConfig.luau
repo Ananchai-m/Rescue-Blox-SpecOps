@@ -1,8 +1,10 @@
+local RunService = game:GetService("RunService")
+
 local GameConfig = {}
 
 -- Game Settings
 GameConfig.MAX_PLAYERS = 1
-GameConfig.GAME_DURATION = 60 -- 5 minutes in seconds
+GameConfig.GAME_DURATION = 300 -- 5 minutes in seconds
 
 -- Waiting System Settings
 GameConfig.WAITING_SYSTEM = {
@@ -80,7 +82,7 @@ GameConfig.RESCUE_BOT = {
 	maxHP = 100,
 	maxBattery = 100,
 	damage = {
-		rockFalling = 20,      -- หินหล่นทับ (ตายใน 5 ครั้ง)
+		rockFalling = 100,      -- หินหล่นทับ (ตายใน 5 ครั้ง) -20
 		rockBounce = 10,       -- หินกระเด็นใส่ (ตายใน 10 ครั้ง)
 		collision = 5,         -- ชนสิ่งของทั่วไป (ตายใน 20 ครั้ง)
 		heavyCollision = 15    -- ชนแรงๆ ความเร็วสูง (ตายใน 6-7 ครั้ง)
@@ -110,7 +112,9 @@ GameConfig.UI = {
 GameConfig.DEBUG = {
 	enableLogging = true,
 	showSpawnPoints = false,
-	godMode = false
+	godMode = false,
+	developerUserIds = {},
+	enableDeveloperShortcuts = true
 }
 
 -- Utility functions
@@ -179,6 +183,40 @@ end
 
 function GameConfig.getRescueBotSettings()
 	return GameConfig.RESCUE_BOT
+end
+
+function GameConfig.isDebugUser(userId)
+	if RunService:IsStudio() then
+		return true
+	end
+
+	if type(userId) ~= "number" then
+		return false
+	end
+
+	local ids = GameConfig.DEBUG and GameConfig.DEBUG.developerUserIds
+	if type(ids) ~= "table" then
+		return false
+	end
+
+	return table.find(ids, userId) ~= nil
+end
+
+function GameConfig.canUseDeveloperShortcuts(userId)
+	if RunService:IsStudio() then
+		return true
+	end
+
+	local debugConfig = GameConfig.DEBUG
+	if not (debugConfig and debugConfig.enableDeveloperShortcuts) then
+		return false
+	end
+
+	if userId == nil then
+		return false
+	end
+
+	return GameConfig.isDebugUser(userId)
 end
 
 -- Validation function
