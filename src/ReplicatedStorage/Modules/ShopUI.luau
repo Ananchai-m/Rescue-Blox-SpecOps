@@ -5,6 +5,9 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
+-- Import TopbarPlus
+local TopbarPlus = require(ReplicatedStorage.Packages.TopbarPlus)
+
 local ShopUI = {}
 
 local player = Players.LocalPlayer
@@ -13,7 +16,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 -- ตัวแปร UI
 local shopScreenGui = nil
 local shopFrame = nil
-local shopButton = nil
+local shopIcon = nil -- เปลี่ยนจาก shopButton เป็น shopIcon
 local isShopOpen = false
 local isAnimating = false
 
@@ -37,54 +40,35 @@ local function formatItemName(text, breakName)
 end
 
 -- ฟังก์ชันสร้าง Shop Button
-local function createShopButton()
-	if shopButton then return shopButton end
+-- ฟังก์ชันสร้าง Shop Icon ด้วย TopbarPlus
+local function createShopIcon()
+	if shopIcon then return shopIcon end
 
-	-- สร้าง ScreenGui สำหรับปุ่ม
-	local buttonGui = Instance.new("ScreenGui")
-	buttonGui.Name = "ShopButtonGui"
-	buttonGui.ResetOnSpawn = false
-	buttonGui.DisplayOrder = 100
-	buttonGui.IgnoreGuiInset = true
-	buttonGui.Parent = playerGui
+	-- สร้าง Icon ด้วย TopbarPlus
+	shopIcon = TopbarPlus.new()
+	    :setImage("4882429582") -- Shopping cart icon
+		:setLabel("Shop")
+		:setOrder(1) -- วางถัดจาก Chat
 
-	-- สร้างปุ่ม Shop
-	shopButton = Instance.new("TextButton")
-	shopButton.Name = "ShopButton"
-	shopButton.Size = UDim2.new(0.08, 0, 0.05, 0)
-	shopButton.Position = UDim2.new(0.1, 0, 0.5, 0) -- มุมขวาบน
-	shopButton.AnchorPoint = Vector2.new(1, 0)
-	shopButton.BackgroundColor3 = Color3.fromRGB(52, 168, 83) -- สีเขียว
-	shopButton.BorderSizePixel = 0
-	shopButton.Font = Enum.Font.GothamBold
-	shopButton.Text = "🛒 SHOP"
-	shopButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-	shopButton.TextSize = 20
-	shopButton.TextScaled = true
-	shopButton.Parent = buttonGui
+	-- Bind events
+	shopIcon.selected:Connect(function()
+		ShopUI.openShop()
+	end)
 
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0.2, 0)
-	corner.Parent = shopButton
+	shopIcon.deselected:Connect(function()
+		ShopUI.closeShop()
+	end)
 
-	return shopButton
+	print("[ShopUI] Created Shop icon with TopbarPlus")
+	return shopIcon
 end
 
-local function ensureShopButton(): TextButton?
-	if shopButton and shopButton.Parent then
-		return shopButton
+local function ensureShopIcon()
+	if shopIcon then
+		return shopIcon
 	end
 
-	local existingGui = playerGui:FindFirstChild("ShopButtonGui")
-	if existingGui and existingGui:IsA("ScreenGui") then
-		local existingButton = existingGui:FindFirstChild("ShopButton")
-		if existingButton and existingButton:IsA("TextButton") then
-			shopButton = existingButton
-			return shopButton
-		end
-	end
-
-	return createShopButton()
+	return createShopIcon()
 end
 
 -- ฟังก์ชันสร้าง Shop UI
@@ -455,6 +439,11 @@ function ShopUI.closeShop()
 
 	isAnimating = true
 
+	-- Deselect TopbarPlus icon
+	if shopIcon then
+		shopIcon:deselect()
+	end
+
 	local background = shopScreenGui:FindFirstChild("Background")
 	local frame = shopScreenGui:FindFirstChild("ShopFrame")
 
@@ -512,13 +501,8 @@ end
 
 -- ฟังก์ชัน Initialize Shop
 function ShopUI.init()
-	-- สร้างปุ่ม Shop
-	local button = ensureShopButton()
-
-	-- เชื่อมปุ่มกับการเปิด Shop
-	button.MouseButton1Click:Connect(function()
-		ShopUI.toggleShop()
-	end)
+	-- สร้าง Shop Icon ด้วย TopbarPlus (events ถูก bind แล้วใน createShopIcon)
+	ensureShopIcon()
 
 	-- สร้าง UI (แต่ยังไม่แสดง)
 	createShopUI()
@@ -567,13 +551,10 @@ function ShopUI.init()
 end
 
 function ShopUI.setButtonVisible(isVisible: boolean)
-	local button = ensureShopButton()
-	if button then
-		button.Visible = isVisible
-		local buttonParent = button.Parent
-		if buttonParent and buttonParent:IsA("ScreenGui") then
-			buttonParent.Enabled = isVisible
-		end
+	local icon = ensureShopIcon()
+	if icon then
+		-- TopbarPlus icons ใช้ :setEnabled() แทน Visible
+		icon:setEnabled(isVisible)
 	end
 
 	if not isVisible then
