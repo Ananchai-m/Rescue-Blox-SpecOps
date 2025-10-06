@@ -43,12 +43,15 @@ local spawnAssignmentRemote = getOrCreateRemote("SpawnAssignment")
 local victimsReadyRemote = getOrCreateRemote("VictimsReady")
 local gameTimerRemote = getOrCreateRemote("GameTimer")
 local toggleDrillModeRemote = getOrCreateRemote("ToggleDrillMode")
+local updateHPRemote = getOrCreateRemote("UpdateHP")
+local updateBatteryRemote = getOrCreateRemote("UpdateBattery")
 local CompanionFollower = require(script.Parent:WaitForChild("CompanionFollower"))
 
--- Import VictimSpawner, GameConfig, and GameSummary
+-- Import VictimSpawner, GameConfig, GameSummary, and RescueBotHealth
 local VictimSpawner = require(ReplicatedStorage.Modules.VictimSpawner)
 local GameConfig = require(ReplicatedStorage.Modules.GameConfig)
 local GameSummary = require(ReplicatedStorage.Modules.GameSummary)
+local RescueBotHealth = require(ReplicatedStorage.Modules.RescueBotHealth)
 
 -- ปิดการนั่งใน VehicleSeat ทั้งหมด
 local function disableVehicleSeats()
@@ -80,6 +83,7 @@ local playerDrillTargets = {}
 local originalRescueConnections = {}
 local drillDebounce = {}
 local companionFollowers = {}
+local rescueBotHealthInstances = {} -- เก็บ RescueBotHealth instances
 
 -- Server-side Waiting System variables
 local waitingPlayers = {}
@@ -816,6 +820,12 @@ spawnOriginalRescueEvent.OnServerEvent:Connect(function(player, position)
 		playerOriginalRescue[player] = nil
 	end
 
+	-- ทำลาย RescueBotHealth instance เก่า
+	if rescueBotHealthInstances[player] then
+		rescueBotHealthInstances[player]:Destroy()
+		rescueBotHealthInstances[player] = nil
+	end
+
 	-- ล้าง original rescue connections เก่า
 	local connectionKey = tostring(player.UserId)
 	if originalRescueConnections[connectionKey] then
@@ -861,6 +871,11 @@ spawnOriginalRescueEvent.OnServerEvent:Connect(function(player, position)
 	end
 
 	playerOriginalRescue[player] = originalRescueModel
+
+	-- สร้าง RescueBotHealth instance
+	local healthInstance = RescueBotHealth.new(originalRescueModel)
+	rescueBotHealthInstances[player] = healthInstance
+	print("[RescueBotServer] Created RescueBotHealth for", player.Name)
 
 	-- พับเก็บ DrillArm หลัง spawn เสร็จ (TargetAngle = 180)
 	task.spawn(function()
@@ -1379,6 +1394,13 @@ end
 local function startGame()
 	print("Server: Starting game with " .. #waitingPlayers .. " players!")
 	isGamePlaying = true
+
+	-- Reset HP และ Battery ของทุก RescueBot
+	for player, healthInstance in pairs(rescueBotHealthInstances) do
+		if healthInstance then
+			healthInstance:Reset()
+		end
+	end
 
 	-- สุ่ม spawn points ให้ผู้เล่นแบบไม่ซ้ำกัน
 	playerSpawnAssignments = assignRandomSpawns(waitingPlayers)

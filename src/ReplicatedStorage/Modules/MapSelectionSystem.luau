@@ -11,7 +11,7 @@ local mapVotingRemote = remoteEvents:WaitForChild("MapVoting")
 
 -- ตัวแปรสำหรับระบบ
 local isVoting = false
-local votingTimer = 15
+local votingTimer = GameConfig.MAP_SELECTION.votingTime
 local currentVotes = {}
 local votingPlayers = {}
 local mapSelectionGui = nil
@@ -68,7 +68,7 @@ local function createMapSelectionUI()
 	timerLabel.Size = UDim2.new(1, 0, 0.1, 0)
 	timerLabel.Position = UDim2.new(0, 0, 0.2, 0)
 	timerLabel.BackgroundTransparency = 1
-	timerLabel.Text = "Time remaining: " .. votingTimer .. " seconds"
+	timerLabel.Text = "Time remaining: " .. tostring(votingTimer) .. " seconds"
 	timerLabel.TextColor3 = Color3.new(1, 0.8, 0)
 	timerLabel.TextScaled = true
 	timerLabel.Font = Enum.Font.Gotham

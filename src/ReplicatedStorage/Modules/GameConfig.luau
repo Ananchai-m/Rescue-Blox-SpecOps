@@ -3,7 +3,6 @@ local GameConfig = {}
 -- Game Settings
 GameConfig.MAX_PLAYERS = 1
 GameConfig.GAME_DURATION = 60 -- 5 minutes in seconds
-GameConfig.VOTING_TIMER = 15 -- seconds for map voting
 
 -- Waiting System Settings
 GameConfig.WAITING_SYSTEM = {
@@ -47,7 +46,7 @@ GameConfig.VEHICLE = {
 
 -- Map Selection Settings
 GameConfig.MAP_SELECTION = {
-	votingTime = 15, -- seconds
+	votingTime = 5, -- seconds
 	maps = {
 		{
 			name = "City Rescue",
@@ -74,6 +73,27 @@ GameConfig.RESCUE = {
 	holdDuration = 5, -- seconds - how long to hold E
 	keyCode = Enum.KeyCode.E, -- rescue key
 	serverValidationDistance = 50 -- studs - server allows more distance for lag
+}
+
+-- RescueBot Settings
+GameConfig.RESCUE_BOT = {
+	maxHP = 100,
+	maxBattery = 100,
+	damage = {
+		rockFalling = 20,      -- หินหล่นทับ (ตายใน 5 ครั้ง)
+		rockBounce = 10,       -- หินกระเด็นใส่ (ตายใน 10 ครั้ง)
+		collision = 5,         -- ชนสิ่งของทั่วไป (ตายใน 20 ครั้ง)
+		heavyCollision = 15    -- ชนแรงๆ ความเร็วสูง (ตายใน 6-7 ครั้ง)
+	},
+	batteryDrain = {
+		idle = 0.05,          -- ต่อวินาทีตอนไม่ทำอะไร
+		moving = 0.2,         -- ต่อวินาทีตอนเคลื่อนที่
+		drilling = 0.5        -- ต่อวินาทีตอนเจาะ
+	},
+	regeneration = {
+		hpPerSecond = 0,      -- ไม่ฟื้นเลือด
+		batteryPerSecond = 0  -- ไม่ชาร์จเอง
+	}
 }
 
 -- UI Settings
@@ -155,6 +175,10 @@ end
 
 function GameConfig.getRescueSettings()
 	return GameConfig.RESCUE
+end
+
+function GameConfig.getRescueBotSettings()
+	return GameConfig.RESCUE_BOT
 end
 
 -- Validation function

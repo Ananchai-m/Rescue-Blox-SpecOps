@@ -36,11 +36,13 @@ local function cancelDrillHideThread()
 end
 
 local function ensureDrillProgressGui()
-	if drillGui then
+	-- ตรวจสอบว่ามี GUI อยู่แล้วและยังอยู่ใน PlayerGui หรือไม่
+	local playerGui = player:WaitForChild("PlayerGui")
+	if drillGui and drillGui.Parent == playerGui then
 		return
 	end
 
-	local playerGui = player:WaitForChild("PlayerGui")
+	print("[DrillSystem] Creating DrillProgressGui")
 	drillGui = Instance.new("ScreenGui")
 	drillGui.Name = "DrillProgressGui"
 	drillGui.ResetOnSpawn = false
@@ -118,22 +120,20 @@ local function hideDrillProgress()
 end
 
 local function showDrillProgress(payload)
-	print("DrillSystem.showDrillProgress called with payload:", payload)
 	ensureDrillProgressGui()
+
 	if not drillContainer then
-		warn("DrillSystem: drillContainer is nil after ensureDrillProgressGui")
+		warn("[DrillSystem] ERROR: drillContainer is nil!")
 		return
 	end
 
 	if payload.status == "cancel" then
-		print("DrillSystem: Hiding progress (cancel)")
 		hideDrillProgress()
 		return
 	end
 
 	cancelDrillHideThread()
 	drillContainer.Visible = true
-	print("DrillSystem: Container set to visible")
 
 	local partName = payload.partName or ""
 	local clicks = payload.clicks or 0
@@ -149,8 +149,6 @@ local function showDrillProgress(payload)
 		drillStatusLabel.Text = string.format("กำลังเจาะ... (%d/%d)", clicks, required)
 	end
 	drillProgressFill.Size = UDim2.new(progress, 0, 1, 0)
-
-	print(string.format("DrillSystem: Updated UI - %s (%d/%d) %.0f%%", partName, clicks, required, progress * 100))
 
 	if payload.status == "complete" then
 		drillHideThread = task.delay(DrillConfig.HIDE_DELAY, function()
@@ -369,7 +367,6 @@ local function startDrilling(partData)
 	-- ตรวจสอบว่ากำลังเจาะ Part เดิมหรือไม่
 	if currentDrillingPart and currentDrillingPart ~= part then
 		-- เปลี่ยน Part ที่เจาะ - ล้างข้อมูลเก่า
-		print("Switching drilling target from", currentDrillingPart.Name, "to", partName)
 		drillingTargets[currentDrillingPart] = nil
 		hideDrillProgress()
 	end
@@ -379,14 +376,12 @@ local function startDrilling(partData)
 
 	-- เริ่ม tracking การเจาะ
 	if not drillingTargets[part] then
-		print("Starting new drilling session for:", partName)
 		drillingTargets[part] = {
 			clicks = 0,
 			partName = partName,
 			requiredClicks = DrillConfig.CLICKS_REQUIRED
 		}
 	else
-		print("Continuing drilling session for:", partName, "Current clicks:", drillingTargets[part].clicks)
 		-- อัปเดต requiredClicks ในกรณีที่ค่าเปลี่ยน
 		drillingTargets[part].requiredClicks = DrillConfig.CLICKS_REQUIRED
 	end
@@ -423,11 +418,6 @@ local function startDrilling(partData)
 
 		-- หาชิ้นที่ติดกันทั้งหมด
 		local connectedParts = findConnectedParts(part)
-		local connectedCount = 0
-		for _ in pairs(connectedParts) do
-			connectedCount = connectedCount + 1
-		end
-		print("Found", connectedCount, "connected parts to", partName, "- Eject strength:", ejectStrength)
 
 		-- เตรียมข้อมูลส่งไป Server เพื่อจัดการ physics
 		local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -453,23 +443,17 @@ local function startDrilling(partData)
 				Position = part.Position,
 				Instance = part
 			}
-			print("Sending", #connectedPartsData, "parts to server for physics simulation")
 			drillCompleteRemote:FireServer(partData, connectedPartsData, rescuePosition, ejectStrength)
-		else
-			warn("DrillComplete RemoteEvent not found!")
 		end
 
 		-- ล้างข้อมูลการเจาะและเพิ่มเข้า recently completed
-		print("Clearing drilling data for completed part:", partName)
 		drillingTargets[part] = nil
 		currentDrillingPart = nil -- ล้าง Part ปัจจุบัน
 		recentlyCompleted[part] = true
 
-		-- ลบออกจาก recently completed หลัง 0.5 วินาที (ลดจาก 3 วินาที เพื่อให้เจาะซ้ำได้เร็วขึ้น)
-		spawn(function()
-			task.wait(0.5)
+		-- ลบออกจาก recently completed หลัง 0.5 วินาที
+		task.delay(0.5, function()
 			recentlyCompleted[part] = nil
-			print("Removed", partName, "from recently completed list")
 		end)
 	end
 
@@ -644,12 +628,9 @@ local function findPartAtDrillArm()
 
 	if rayResult and rayResult.Instance then
 		local hitPart = rayResult.Instance
-		-- สร้าง beam สีเขียวถ้าเจอ part
-		--createDebugBeam(rayOrigin, rayResult.Position, Color3.fromRGB(0, 255, 0))
-		warn("Raycast hit:", hitPart.Name, "Distance:", rayResult.Distance, "Position:", hitPart.Position)
 
 		if (hitPart:IsA("BasePart") or hitPart:IsA("MeshPart")) then
-			-- เช็คว่าอยู่ใน Obstacles folder (เช็คจากชื่อ)
+			-- เช็คว่าอยู่ใน Obstacles folder
 			local isInObstacles = false
 			local ancestor = hitPart.Parent
 			while ancestor and ancestor ~= workspace do
@@ -660,22 +641,14 @@ local function findPartAtDrillArm()
 				ancestor = ancestor.Parent
 			end
 
-			warn("  IsInObstacles:", isInObstacles, "IsBodyPart:", isBodyPart(hitPart), "RecentlyCompleted:", recentlyCompleted[hitPart] ~= nil)
-
 			-- เช็คว่าไม่ใช่ body part และไม่ใช่ part ที่เพิ่งเจาะเสร็จ
 			if isInObstacles and not isBodyPart(hitPart) and not recentlyCompleted[hitPart] then
-				warn("✓ Found valid drilling target:", hitPart.Name)
 				return {
 					part = hitPart,
 					distance = rayResult.Distance
 				}
 			end
 		end
-	else
-		-- สร้าง beam สีแดงถ้าไม่เจออะไร
-		local endPos = rayOrigin + rayDirection
-		--createDebugBeam(rayOrigin, endPos, Color3.fromRGB(255, 0, 0))
-		warn("✗ Raycast hit nothing - DrillArm at:", rayOrigin, "Direction:", rayDirection)
 	end
 
 	return nil
@@ -722,18 +695,8 @@ function DrillSystem.handleDrillingClick(clickPosition)
 
 	-- ถ้ากำลังเจาะ part อยู่ ให้เจาะต่อไปเลยโดยไม่ต้องหา part ใหม่
 	if currentDrillingPart and drillingTargets[currentDrillingPart] then
-		warn("⚙ Continuing to drill:", currentDrillingPart.Name)
 		local targetPart = {part = currentDrillingPart, distance = 0}
-		local completed = startDrilling(targetPart)
-
-		if completed then
-			warn("✓ Drilling completed for:", targetPart.part.Name)
-		else
-			local target = drillingTargets[targetPart.part]
-			warn(string.format("⚙ Drilling %s... (%d/%d clicks)",
-				target.partName, target.clicks, target.requiredClicks))
-		end
-
+		startDrilling(targetPart)
 		return true -- กำลังเจาะ part เดิมอยู่
 	end
 
@@ -741,20 +704,8 @@ function DrillSystem.handleDrillingClick(clickPosition)
 	local targetPart = findPartAtDrillArm()
 
 	if targetPart then
-		warn("🎯 New drilling target found:", targetPart.part.Name)
-		local completed = startDrilling(targetPart)
-
-		if completed then
-			warn("✓ Drilling completed for:", targetPart.part.Name)
-		else
-			local target = drillingTargets[targetPart.part]
-			warn(string.format("⚙ Drilling %s... (%d/%d clicks)",
-				target.partName, target.clicks, target.requiredClicks))
-		end
-
+		startDrilling(targetPart)
 		return true -- มี target ให้เจาะ
-	else
-		warn("✗ No part found at DrillArm position")
 	end
 
 	return false -- ไม่มี target ให้เจาะ
