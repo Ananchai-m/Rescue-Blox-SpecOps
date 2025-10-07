@@ -38,9 +38,90 @@ local player = Players.LocalPlayer
 local character = script.Parent
 local humanoid = character:WaitForChild("Humanoid")
 local camera = Workspace.CurrentCamera
+local playerGui = player:WaitForChild("PlayerGui")
 
 local ScreenGuis = ReplicatedStorage.ScreenGuis
 local FlipGui = ScreenGuis:WaitForChild("FlipBillboardGui")
+
+local isSummaryActive = false
+local summaryPrevMouseBehavior: Enum.MouseBehavior? = nil
+local summaryPrevMouseIconEnabled: boolean? = nil
+
+local function hideTopbarIcons()
+	ShopUI.setButtonVisible(false)
+	CustomizeUI.setButtonVisible(false)
+end
+
+local function showTopbarIcons()
+	if isSummaryActive then
+		return
+	end
+
+	ShopUI.setButtonVisible(true)
+	CustomizeUI.setButtonVisible(true)
+end
+
+local function monitorSummaryGui(summaryGui)
+	if not summaryGui then
+		return
+	end
+
+	if not isSummaryActive then
+		summaryPrevMouseBehavior = UserInputService.MouseBehavior
+		summaryPrevMouseIconEnabled = UserInputService.MouseIconEnabled
+	end
+
+	isSummaryActive = true
+	hideTopbarIcons()
+
+	UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+	UserInputService.MouseIconEnabled = true
+
+	local restored = false
+	local function restoreIconsOnce()
+		if restored then
+			return
+		end
+		restored = true
+		isSummaryActive = false
+
+		if summaryPrevMouseBehavior then
+			UserInputService.MouseBehavior = summaryPrevMouseBehavior
+			summaryPrevMouseBehavior = nil
+		else
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		end
+
+		if summaryPrevMouseIconEnabled ~= nil then
+			UserInputService.MouseIconEnabled = summaryPrevMouseIconEnabled
+			summaryPrevMouseIconEnabled = nil
+		else
+			UserInputService.MouseIconEnabled = true
+		end
+		showTopbarIcons()
+	end
+
+	summaryGui.AncestryChanged:Connect(function(_, parent)
+		if not parent then
+			restoreIconsOnce()
+		end
+	end)
+
+	summaryGui.Destroying:Connect(function()
+		restoreIconsOnce()
+	end)
+end
+
+local existingSummary = playerGui:FindFirstChild("GameSummaryGui")
+if existingSummary then
+	monitorSummaryGui(existingSummary)
+end
+
+playerGui.ChildAdded:Connect(function(child)
+	if child.Name == "GameSummaryGui" then
+		monitorSummaryGui(child)
+	end
+end)
 
 local connectionSteer = nil
 local connectionThrottle = nil
@@ -712,6 +793,9 @@ function startOriginalRescueMode()
 		return
 	end
 
+	-- ซ่อน Topbar icons เมื่อเข้าสู่โหมด Rescue จริง
+	hideTopbarIcons()
+
 	DrillSystem.setDrillEnabled(true)
 
 	-- เก็บใน VehicleController
@@ -1107,9 +1191,8 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 
 			print("Starting map selection...")
 			ShopUI.closeShop()
-			ShopUI.setButtonVisible(false)
 			CustomizeUI.closeCustomize()
-			CustomizeUI.setButtonVisible(false)
+			hideTopbarIcons()
 
 			local function cleanupVotingCallback()
 				if unregisterVotingComplete then
@@ -1144,8 +1227,7 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 			unregisterVotingComplete()
 			unregisterVotingComplete = nil
 		end
-		ShopUI.setButtonVisible(true)
-		CustomizeUI.setButtonVisible(true)
+		showTopbarIcons()
 
 		-- ล้างสถานะเกมทั้งหมด
 		playerInGame = false
@@ -1212,8 +1294,7 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 			unregisterVotingComplete()
 			unregisterVotingComplete = nil
 		end
-		ShopUI.setButtonVisible(true)
-		CustomizeUI.setButtonVisible(true)
+		showTopbarIcons()
 	end
 end)
 

@@ -476,14 +476,6 @@ function MapSelectionSystem.startVoting(players)
 			end
 		end
 
-		-- แสดง Shop และ Customize icons กลับมา
-		if ShopUI.setButtonVisible then
-			ShopUI.setButtonVisible(true)
-		end
-		if CustomizeUI.setButtonVisible then
-			CustomizeUI.setButtonVisible(true)
-		end
-
 		isVoting = false
 	end)
 
