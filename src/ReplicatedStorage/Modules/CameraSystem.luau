@@ -5,8 +5,12 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local CameraSystem = {}
+
+-- Import CustomizeService
+local CustomizeService = require(ReplicatedStorage.Modules.CustomizeService)
 
 -- ตัวแปรสำหรับระบบ
 local player = Players.LocalPlayer
@@ -18,7 +22,7 @@ local originalCameraSubject = nil
 local originalCameraType = nil
 local cameraTrackConnection = nil
 local originalFieldOfView = nil
-local cameraZoomLevels = {1, 2, 5}
+local cameraZoomLevels = {1} -- Default: zoom ได้แค่ 1x
 local zoomIndex = 1
 
 -- Thermal vision variables
@@ -40,6 +44,48 @@ local zoomGui = nil
 local zoomLabel = nil
 
 -- ===== CAMERA ZOOM FUNCTIONS =====
+
+-- ฟังก์ชันตรวจสอบและตั้งค่า zoom levels ตาม equipped items
+local function updateZoomLevels()
+	-- ดึง equipped items จาก server
+	local equippedItems = CustomizeService.getEquippedItems()
+
+	if not equippedItems or #equippedItems == 0 then
+		-- ไม่มี equipment: zoom ได้แค่ 1x
+		cameraZoomLevels = {1}
+		print("[CameraSystem] No equipment: Zoom limited to 1x")
+		return
+	end
+
+	-- เช็คว่ามี camera equipment ไหน
+	local hasThermometerCamera = false
+	local hasZoom3x5xCamera = false
+
+	for _, equippedItem in ipairs(equippedItems) do
+		if equippedItem.id == "ThermometerCamera" then
+			hasThermometerCamera = true
+		elseif equippedItem.id == "Zoom3x5xCamera" then
+			hasZoom3x5xCamera = true
+		end
+	end
+
+	-- ตั้งค่า zoom levels
+	if hasZoom3x5xCamera then
+		cameraZoomLevels = {1, 3, 5}
+		print("[CameraSystem] Zoom 3x-5x Camera detected: Zoom levels {1x, 3x, 5x}")
+	elseif hasThermometerCamera then
+		cameraZoomLevels = {1, 2}
+		print("[CameraSystem] Thermometer Camera detected: Zoom levels {1x, 2x}")
+	else
+		cameraZoomLevels = {1}
+		print("[CameraSystem] No camera equipment: Zoom limited to 1x")
+	end
+
+	-- Reset zoom index ถ้าเกินขอบเขต
+	if zoomIndex > #cameraZoomLevels then
+		zoomIndex = #cameraZoomLevels
+	end
+end
 
 local function ensureZoomGui()
 	local playerGui = player:FindFirstChildOfClass("PlayerGui")
@@ -310,6 +356,9 @@ function CameraSystem.startCameraTracking()
 		print("CameraSystem: No Camera part found in rescue vehicle")
 		return false
 	end
+
+	-- อัปเดต zoom levels ตาม equipped items
+	updateZoomLevels()
 
 	-- บันทึกค่าเดิม
 	if not isZoomMode then

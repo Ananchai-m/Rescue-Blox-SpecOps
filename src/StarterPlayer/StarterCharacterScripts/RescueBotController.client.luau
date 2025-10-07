@@ -17,6 +17,7 @@ local CameraSystem = require(ReplicatedStorage.Modules.CameraSystem)
 local VehicleController = require(ReplicatedStorage.Modules.VehicleController)
 local GameConfig = require(ReplicatedStorage.Modules.GameConfig)
 local ShopUI = require(ReplicatedStorage.Modules.ShopUI)
+local CustomizeService = require(ReplicatedStorage.Modules.CustomizeService)
 
 -- รอ RemoteEvents
 local remoteEvents = ReplicatedStorage:WaitForChild("RescueBotRemotes")
@@ -885,8 +886,25 @@ connections.inputBegan = UserInputService.InputBegan:Connect(function(input, gam
 		print("DEBUG: Z key pressed, calling CameraSystem.toggleCameraTracking()")
 		CameraSystem.toggleCameraTracking()
 	elseif input.KeyCode == Enum.KeyCode.X then
-		-- กด X เพื่อ toggle thermal vision (ต้องเปิด camera tracking ก่อน)
-		CameraSystem.toggleThermalVision()
+		-- กด X เพื่อ toggle thermal vision (ต้องมี Thermometer Camera)
+		-- เช็คว่ามี Thermometer Camera equip อยู่หรือไม่
+		local equippedItems = CustomizeService.getEquippedItems()
+		local hasThermometerCamera = false
+
+		if equippedItems then
+			for _, equippedItem in ipairs(equippedItems) do
+				if equippedItem.id == "ThermometerCamera" then
+					hasThermometerCamera = true
+					break
+				end
+			end
+		end
+
+		if hasThermometerCamera then
+			CameraSystem.toggleThermalVision()
+		else
+			print("[CameraSystem] Thermometer Camera required to use thermal vision!")
+		end
 	end
 
 	if CameraSystem.isInZoomMode() then
