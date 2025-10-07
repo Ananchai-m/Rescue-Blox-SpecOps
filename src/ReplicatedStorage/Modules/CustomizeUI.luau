@@ -18,7 +18,6 @@ local camera = Workspace.CurrentCamera
 
 -- ตัวแปร UI
 local customizeScreenGui = nil
-local customizeFrame = nil
 local customizeIcon = nil
 local isCustomizeOpen = false
 local isAnimating = false
@@ -42,6 +41,95 @@ local inputChangedConnection = nil
 
 -- ตัวแปรสำหรับพับแขน
 local armsExtended = true -- true = พับ (0), false = เก็บ (180)
+
+-- ค่าคงที่และตัวแปรสำหรับ Inventory UI
+local SLOT_COLUMNS = 6
+local SLOT_ROWS = 7
+local SLOT_CELL_SIZE = Vector2.new(70, 70)
+local SLOT_CELL_PADDING = Vector2.new(10, 10)
+
+type SlotData = {
+	frame: Frame,
+	row: number,
+	column: number,
+	defaultColor: Color3,
+	defaultTransparency: number,
+	stroke: UIStroke?,
+	defaultStrokeColor: Color3?,
+}
+
+local inventorySlots: { SlotData } = {}
+local slotMap: { [number]: { [number]: SlotData? } } = {}
+local slotOccupancy: { [number]: { [number]: GuiObject? } } = {}
+local slotsOverlayFrame: Frame? = nil
+local placedItems: { GuiObject } = {}
+
+type LoadoutConfig = {
+	id: string,
+	displayName: string,
+	size: Vector2,
+}
+
+local loadoutConfigs: { LoadoutConfig } = {
+	{ id = "SolarCell", displayName = "SolarCell", size = Vector2.new(2, 1) },
+	{ id = "ThermometerCamera", displayName = "Thermometer\nCamera", size = Vector2.new(1, 1) },
+	{ id = "Zoom3x5xCamera", displayName = "Zoom3x-5x\nCamera", size = Vector2.new(1, 1) },
+}
+
+type DragContext = {
+	active: boolean,
+	config: LoadoutConfig?,
+	ghost: Frame?,
+	connections: { RBXScriptConnection }?,
+	currentPlacement: any,
+	highlight: { SlotData }?,
+	originalParent: GuiObject?,
+	placeholder: Frame?,
+	originalLayoutOrder: number?,
+	isFromSlot: boolean?,
+	occupiedCells: { SlotData }?,
+	targetLoadoutSlot: Frame?,
+}
+
+local dragContext: DragContext = {
+	active = false,
+	config = nil,
+	ghost = nil,
+	connections = nil,
+	currentPlacement = nil,
+	highlight = nil,
+	originalParent = nil,
+	placeholder = nil,
+	originalLayoutOrder = nil,
+	isFromSlot = false,
+	occupiedCells = nil,
+	targetLoadoutSlot = nil,
+}
+
+local loadoutBarFrame: Frame? = nil
+
+local createLoadoutSlot: ((LoadoutConfig, number) -> Frame)?
+local rebuildLoadoutItems: (() -> ())?
+local beginSlotItemDrag: ((Frame) -> ())?
+
+local function isCellWithinAllowedArea(row: number, column: number): boolean
+	return row >= 1 and row <= 2 and column >= 1 and column <= 2
+end
+
+local function isPlacementWithinAllowedArea(startRow: number, startColumn: number, config: LoadoutConfig): boolean
+	local endRow = startRow + config.size.Y - 1
+	local endColumn = startColumn + config.size.X - 1
+
+	for row = startRow, endRow do
+		for column = startColumn, endColumn do
+			if not isCellWithinAllowedArea(row, column) then
+				return false
+			end
+		end
+	end
+
+	return true
+end
 
 -- ฟังก์ชันสร้าง Customize Icon ด้วย TopbarPlus
 local function createCustomizeIcon()
@@ -75,6 +163,805 @@ local function ensureCustomizeIcon()
 	return createCustomizeIcon()
 end
 
+local function initializeSlotState()
+	table.clear(inventorySlots)
+	for row = 1, SLOT_ROWS do
+		slotMap[row] = slotMap[row] or {}
+		slotOccupancy[row] = slotOccupancy[row] or {}
+		table.clear(slotMap[row])
+		table.clear(slotOccupancy[row])
+	end
+
+	table.clear(placedItems)
+end
+
+local function disconnectDragConnections()
+	if dragContext.connections then
+		for _, connection in ipairs(dragContext.connections) do
+			connection:Disconnect()
+		end
+	end
+
+	dragContext.connections = nil
+end
+
+local function clearSlotHighlights()
+	if dragContext.highlight then
+		for _, cell in ipairs(dragContext.highlight) do
+			local frame = cell.frame
+			frame.BackgroundColor3 = cell.defaultColor
+			frame.BackgroundTransparency = cell.defaultTransparency
+			if cell.stroke and cell.defaultStrokeColor then
+				cell.stroke.Color = cell.defaultStrokeColor
+			end
+		end
+	end
+
+	dragContext.highlight = nil
+end
+
+local function applySlotHighlight(cells: { SlotData }, isValid: boolean)
+	clearSlotHighlights()
+	if not cells or #cells == 0 then
+		return
+	end
+
+	dragContext.highlight = cells
+
+	local highlightColor = if isValid then Color3.fromRGB(120, 190, 140) else Color3.fromRGB(205, 120, 120)
+	local highlightTransparency = if isValid then 0.08 else 0.25
+
+	for _, cell in ipairs(cells) do
+		local frame = cell.frame
+		frame.BackgroundColor3 = highlightColor
+		frame.BackgroundTransparency = highlightTransparency
+		if cell.stroke then
+			cell.stroke.Color = highlightColor
+		end
+	end
+end
+
+local function clearInventoryPlacements()
+	for _, guiObject in ipairs(placedItems) do
+		if guiObject and guiObject.Parent then
+			guiObject:Destroy()
+		end
+	end
+
+	table.clear(placedItems)
+
+	if slotsOverlayFrame then
+		for _, child in ipairs(slotsOverlayFrame:GetChildren()) do
+			child:Destroy()
+		end
+	end
+
+	for row = 1, SLOT_ROWS do
+		if slotOccupancy[row] then
+			for column = 1, SLOT_COLUMNS do
+				slotOccupancy[row][column] = nil
+			end
+		end
+	end
+
+	clearSlotHighlights()
+	dragContext.currentPlacement = nil
+	dragContext.placeholder = nil
+	dragContext.originalParent = nil
+	dragContext.originalLayoutOrder = nil
+	dragContext.ghost = nil
+	dragContext.active = false
+	dragContext.config = nil
+	dragContext.isFromSlot = false
+	dragContext.occupiedCells = nil
+
+	if loadoutBarFrame and rebuildLoadoutItems then
+		rebuildLoadoutItems()
+	end
+end
+
+local function setGuiTreeZIndex(guiObject: GuiObject, baseZIndex: number)
+	guiObject.ZIndex = baseZIndex
+	for _, descendant in ipairs(guiObject:GetDescendants()) do
+		if descendant:IsA("GuiObject") then
+			descendant.ZIndex = baseZIndex + 1
+		end
+	end
+end
+
+local function cancelActiveDrag()
+	if not dragContext.active then
+		return
+	end
+
+	local ghost = dragContext.ghost
+	local placeholder = dragContext.placeholder
+	local originalParent = dragContext.originalParent
+
+	if placeholder then
+		placeholder:Destroy()
+	end
+
+	if ghost then
+		ghost.AnchorPoint = Vector2.new(0, 0)
+		ghost.Position = UDim2.new(0, 0, 0, 0)
+		ghost.Size = UDim2.new(0, SLOT_CELL_SIZE.X, 0, SLOT_CELL_SIZE.Y)
+		ghost.Active = true
+		ghost.Selectable = false
+
+		local targetParent = originalParent or loadoutBarFrame
+		if targetParent then
+			ghost.Parent = targetParent
+			setGuiTreeZIndex(ghost, (targetParent.ZIndex or 1) + 1)
+			if dragContext.originalLayoutOrder then
+				ghost.LayoutOrder = dragContext.originalLayoutOrder
+			end
+		else
+			ghost:Destroy()
+		end
+	end
+
+	dragContext.active = false
+	dragContext.config = nil
+	dragContext.ghost = nil
+	dragContext.currentPlacement = nil
+	dragContext.originalParent = nil
+	dragContext.placeholder = nil
+	dragContext.originalLayoutOrder = nil
+	dragContext.isFromSlot = false
+	dragContext.occupiedCells = nil
+
+	clearSlotHighlights()
+	disconnectDragConnections()
+
+	if loadoutBarFrame and rebuildLoadoutItems then
+		rebuildLoadoutItems()
+	end
+end
+
+local function findSlotUnderPoint(position: Vector2): SlotData?
+	for _, slot in ipairs(inventorySlots) do
+		local frame = slot.frame
+		local absPos = frame.AbsolutePosition
+		local size = frame.AbsoluteSize
+		if position.X >= absPos.X and position.X <= absPos.X + size.X and position.Y >= absPos.Y and position.Y <= absPos.Y + size.Y then
+			return slot
+		end
+	end
+
+	return nil
+end
+
+local function isPointOverLoadoutBar(position: Vector2): boolean
+	if not loadoutBarFrame then
+		return false
+	end
+
+	local absPos = loadoutBarFrame.AbsolutePosition
+	local size = loadoutBarFrame.AbsoluteSize
+	return position.X >= absPos.X and position.X <= absPos.X + size.X and position.Y >= absPos.Y and position.Y <= absPos.Y + size.Y
+end
+
+local function findLoadoutSlotUnderPoint(position: Vector2): Frame?
+	if not loadoutBarFrame then
+		return nil
+	end
+
+	for _, child in ipairs(loadoutBarFrame:GetChildren()) do
+		if child:IsA("Frame") and string.find(child.Name, "LoadoutSlot") then
+			local absPos = child.AbsolutePosition
+			local size = child.AbsoluteSize
+			if position.X >= absPos.X and position.X <= absPos.X + size.X and position.Y >= absPos.Y and position.Y <= absPos.Y + size.Y then
+				return child
+			end
+		end
+	end
+
+	return nil
+end
+
+local function evaluatePlacement(position: Vector2, config: LoadoutConfig)
+	if not config then
+		return nil
+	end
+
+	-- ตรวจสอบว่าเมาส์อยู่เหนือ LoadoutBar หรือไม่
+	if isPointOverLoadoutBar(position) then
+		return {
+			valid = true,
+			isOverLoadoutBar = true,
+		}
+	end
+
+	local topSlot = findSlotUnderPoint(position)
+	if not topSlot then
+		return nil
+	end
+
+	local endColumn = topSlot.column + config.size.X - 1
+	local endRow = topSlot.row + config.size.Y - 1
+
+	local cells: { SlotData } = {}
+	local blocked = false
+
+	if not isPlacementWithinAllowedArea(topSlot.row, topSlot.column, config) then
+		for row = topSlot.row, math.min(endRow, SLOT_ROWS) do
+			for column = topSlot.column, math.min(endColumn, SLOT_COLUMNS) do
+				local cell = slotMap[row][column]
+				if cell then
+					table.insert(cells, cell)
+				end
+			end
+		end
+
+		return {
+			valid = false,
+			cells = cells,
+			blocked = true,
+		}
+	end
+
+	if endColumn > SLOT_COLUMNS or endRow > SLOT_ROWS then
+		for row = topSlot.row, math.min(endRow, SLOT_ROWS) do
+			for column = topSlot.column, math.min(endColumn, SLOT_COLUMNS) do
+				local cell = slotMap[row][column]
+				if cell then
+					table.insert(cells, cell)
+				end
+			end
+		end
+
+		return {
+			valid = false,
+			cells = cells,
+			blocked = true,
+		}
+	end
+
+	for row = topSlot.row, endRow do
+		for column = topSlot.column, endColumn do
+			local cell = slotMap[row][column]
+			if cell then
+				table.insert(cells, cell)
+				if slotOccupancy[row][column] then
+					blocked = true
+				end
+			end
+		end
+	end
+
+	local bottomSlot = slotMap[endRow] and slotMap[endRow][endColumn] or nil
+
+	return {
+		valid = not blocked,
+		cells = cells,
+		topSlot = topSlot,
+		bottomSlot = bottomSlot,
+		topRow = topSlot.row,
+		topColumn = topSlot.column,
+		endRow = endRow,
+		endColumn = endColumn,
+	}
+end
+
+local function positionGhost(mousePosition: Vector2)
+	if dragContext.ghost then
+		dragContext.ghost.Position = UDim2.fromOffset(mousePosition.X, mousePosition.Y)
+	end
+end
+
+local function updateDragState(mousePosition: Vector2)
+	positionGhost(mousePosition)
+
+	local placement = evaluatePlacement(mousePosition, dragContext.config)
+	dragContext.currentPlacement = placement
+
+	-- ตรวจสอบว่าเมาส์อยู่เหนือ LoadoutSlot หรือไม่ (สำหรับการสลับตำแหน่ง)
+	if not dragContext.isFromSlot then
+		local targetSlot = findLoadoutSlotUnderPoint(mousePosition)
+		dragContext.targetLoadoutSlot = targetSlot
+
+		-- แสดง highlight บน LoadoutSlot ถ้ามี
+		if targetSlot and targetSlot ~= dragContext.ghost then
+			targetSlot.BackgroundColor3 = Color3.fromRGB(120, 190, 140)
+			targetSlot.BackgroundTransparency = 0.3
+		end
+
+		-- ลบ highlight จาก LoadoutSlot เก่า
+		if loadoutBarFrame then
+			for _, child in ipairs(loadoutBarFrame:GetChildren()) do
+				if child:IsA("Frame") and string.find(child.Name, "LoadoutSlot") and child ~= targetSlot and child ~= dragContext.ghost then
+					child.BackgroundColor3 = Color3.fromRGB(58, 62, 77)
+					child.BackgroundTransparency = 0.08
+				end
+			end
+		end
+	end
+
+	if placement then
+		applySlotHighlight(placement.cells or {}, placement.valid)
+	else
+		clearSlotHighlights()
+	end
+end
+
+local function updateSlotLabels()
+	-- อัปเดต visibility ของ LV1 labels ตาม slot occupancy
+	for row = 1, 2 do
+		for column = 1, 2 do
+			local cell = slotMap[row] and slotMap[row][column]
+			if cell then
+				local levelLabel = cell.frame:FindFirstChild("LevelTag")
+				if levelLabel then
+					-- แสดง label เฉพาะเมื่อ slot ว่าง
+					levelLabel.Visible = not slotOccupancy[row][column]
+				end
+			end
+		end
+	end
+end
+
+local function finalizePlacement(placement)
+	local ghost = dragContext.ghost
+	if not ghost or not placement or not placement.valid or not slotsOverlayFrame then
+		return
+	end
+
+	local topSlotFrame = placement.topSlot.frame
+
+	-- คำนวณ bottomSlot อย่างถูกต้องตาม config size
+	local bottomSlotFrame: Frame
+	if placement.bottomSlot then
+		bottomSlotFrame = placement.bottomSlot.frame
+	else
+		-- ถ้าไม่มี bottomSlot ใน placement ให้คำนวณเอง
+		local endRow = placement.endRow or placement.topRow
+		local endColumn = placement.endColumn or placement.topColumn
+		local bottomSlot = slotMap[endRow] and slotMap[endRow][endColumn]
+		bottomSlotFrame = bottomSlot and bottomSlot.frame or topSlotFrame
+	end
+
+	local topPosition = Vector2.new(topSlotFrame.AbsolutePosition.X, topSlotFrame.AbsolutePosition.Y)
+	local bottomRight = Vector2.new(
+		bottomSlotFrame.AbsolutePosition.X + bottomSlotFrame.AbsoluteSize.X,
+		bottomSlotFrame.AbsolutePosition.Y + bottomSlotFrame.AbsoluteSize.Y
+	)
+	local overlayPosition = Vector2.new(slotsOverlayFrame.AbsolutePosition.X, slotsOverlayFrame.AbsolutePosition.Y)
+
+	ghost.Parent = slotsOverlayFrame
+	ghost.AnchorPoint = Vector2.new(0, 0)
+	ghost.Position = UDim2.fromOffset(topPosition.X - overlayPosition.X, topPosition.Y - overlayPosition.Y)
+	ghost.Size = UDim2.fromOffset(bottomRight.X - topPosition.X, bottomRight.Y - topPosition.Y)
+	ghost.Active = false
+	ghost.Selectable = false
+	setGuiTreeZIndex(ghost, (slotsOverlayFrame.ZIndex or 1) + 1)
+
+	if dragContext.placeholder then
+		dragContext.placeholder:Destroy()
+		dragContext.placeholder = nil
+	end
+
+	dragContext.originalParent = nil
+	dragContext.originalLayoutOrder = nil
+
+	for _, cell in ipairs(placement.cells or {}) do
+		if slotOccupancy[cell.row] then
+			slotOccupancy[cell.row][cell.column] = ghost
+		end
+	end
+
+	ghost:SetAttribute("ItemId", dragContext.config and dragContext.config.id or "")
+	ghost:SetAttribute("TopRow", placement.topRow)
+	ghost:SetAttribute("TopColumn", placement.topColumn)
+
+	placedItems[#placedItems + 1] = ghost
+
+	-- อัปเดต slot labels
+	updateSlotLabels()
+
+	-- เพิ่ม InputBegan event สำหรับการลากกลับ
+	ghost.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			beginSlotItemDrag(ghost)
+		end
+	end)
+end
+
+local function finishDrag(success: boolean)
+	local ghost = dragContext.ghost
+	local placement = dragContext.currentPlacement
+	local targetSlot = dragContext.targetLoadoutSlot
+
+	print("[CustomizeUI] finishDrag - success:", success, "placement:", placement, "valid:", placement and placement.valid, "isOverLoadoutBar:", placement and placement.isOverLoadoutBar, "isFromSlot:", dragContext.isFromSlot, "targetSlot:", targetSlot)
+
+	-- ลบ highlight จาก LoadoutSlots ทั้งหมด
+	if loadoutBarFrame then
+		for _, child in ipairs(loadoutBarFrame:GetChildren()) do
+			if child:IsA("Frame") and string.find(child.Name, "LoadoutSlot") then
+				child.BackgroundColor3 = Color3.fromRGB(58, 62, 77)
+				child.BackgroundTransparency = 0.08
+			end
+		end
+	end
+
+	if success and placement and placement.valid and not placement.isOverLoadoutBar then
+		-- วางสำเร็จใน Slots
+		print("[CustomizeUI] Placing item in slot")
+		finalizePlacement(placement)
+	elseif not dragContext.isFromSlot and targetSlot and targetSlot ~= ghost then
+		-- สลับตำแหน่งกับ LoadoutSlot อื่น
+		print("[CustomizeUI] Swapping positions with target slot")
+
+		if dragContext.placeholder then
+			dragContext.placeholder:Destroy()
+			dragContext.placeholder = nil
+		end
+
+		if ghost then
+			local ghostLayoutOrder = dragContext.originalLayoutOrder or ghost.LayoutOrder
+			local targetLayoutOrder = targetSlot.LayoutOrder
+
+			-- สลับ LayoutOrder
+			ghost.LayoutOrder = targetLayoutOrder
+			targetSlot.LayoutOrder = ghostLayoutOrder
+
+			-- รีเซ็ต ghost
+			ghost.AnchorPoint = Vector2.new(0, 0)
+			ghost.Position = UDim2.new(0, 0, 0, 0)
+			ghost.Size = UDim2.new(0, SLOT_CELL_SIZE.X, 0, SLOT_CELL_SIZE.Y)
+			ghost.Active = true
+			ghost.Selectable = false
+			ghost.Parent = loadoutBarFrame
+			setGuiTreeZIndex(ghost, (loadoutBarFrame.ZIndex or 1) + 1)
+
+			print("[CustomizeUI] Swapped successfully")
+		end
+	else
+		-- ยกเลิกการลาก หรือวางไม่ถูกต้อง - คืนกลับไปที่ LoadoutBar
+		print("[CustomizeUI] Returning item to LoadoutBar")
+
+		if dragContext.placeholder then
+			dragContext.placeholder:Destroy()
+			dragContext.placeholder = nil
+		end
+
+		if ghost then
+			-- ถ้าลากมาจาก Slot ให้ลบออกแล้วสร้างใหม่ที่ LoadoutBar
+			if dragContext.isFromSlot and dragContext.occupiedCells then
+				print("[CustomizeUI] Item was from slot, removing and rebuilding")
+
+				-- ลบ item ออกจาก Slots
+				for _, cell in ipairs(dragContext.occupiedCells) do
+					if slotOccupancy[cell.row] then
+						slotOccupancy[cell.row][cell.column] = nil
+					end
+				end
+
+				-- ลบ ghost จาก placedItems
+				for i, item in ipairs(placedItems) do
+					if item == ghost then
+						table.remove(placedItems, i)
+						break
+					end
+				end
+
+				-- ลบ ghost
+				ghost:Destroy()
+
+				-- อัปเดต slot labels
+				updateSlotLabels()
+
+				-- สร้าง loadout slot ใหม่
+				if loadoutBarFrame and rebuildLoadoutItems then
+					rebuildLoadoutItems()
+					print("[CustomizeUI] LoadoutBar rebuilt")
+				else
+					warn("[CustomizeUI] Cannot rebuild - loadoutBarFrame or rebuildLoadoutItems is nil")
+				end
+			else
+				-- ลากมาจาก LoadoutBar - คืนกลับไปที่ LoadoutBar
+				print("[CustomizeUI] Item was from LoadoutBar, returning to original position")
+
+				ghost.AnchorPoint = Vector2.new(0, 0)
+				ghost.Position = UDim2.new(0, 0, 0, 0)
+				ghost.Size = UDim2.new(0, SLOT_CELL_SIZE.X, 0, SLOT_CELL_SIZE.Y)
+				ghost.Active = true
+				ghost.Selectable = false
+
+				if loadoutBarFrame then
+					ghost.Parent = loadoutBarFrame
+					setGuiTreeZIndex(ghost, (loadoutBarFrame.ZIndex or 1) + 1)
+					if dragContext.originalLayoutOrder then
+						ghost.LayoutOrder = dragContext.originalLayoutOrder
+					end
+					print("[CustomizeUI] Item returned to LoadoutBar successfully")
+				else
+					warn("[CustomizeUI] loadoutBarFrame is nil, destroying ghost")
+					ghost:Destroy()
+				end
+			end
+		else
+			warn("[CustomizeUI] ghost is nil in finishDrag")
+		end
+	end
+
+	dragContext.active = false
+	dragContext.config = nil
+	dragContext.ghost = nil
+	dragContext.currentPlacement = nil
+	dragContext.originalParent = nil
+	dragContext.originalLayoutOrder = nil
+	dragContext.isFromSlot = false
+	dragContext.occupiedCells = nil
+	dragContext.targetLoadoutSlot = nil
+
+	clearSlotHighlights()
+	disconnectDragConnections()
+end
+
+local function handleDragInputChanged(input)
+	if not dragContext.active then
+		return
+	end
+
+	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+		updateDragState(UserInputService:GetMouseLocation())
+	end
+end
+
+local function handleDragInputEnded(input)
+	if not dragContext.active then
+		return
+	end
+
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		local mousePosition = UserInputService:GetMouseLocation()
+
+		-- อัปเดต placement ล่าสุดก่อนตัดสินใจ
+		local placement = evaluatePlacement(mousePosition, dragContext.config)
+		dragContext.currentPlacement = placement
+
+		-- อัปเดต targetLoadoutSlot ล่าสุด
+		if not dragContext.isFromSlot then
+			dragContext.targetLoadoutSlot = findLoadoutSlotUnderPoint(mousePosition)
+		end
+
+		-- ถ้า placement valid และไม่ใช่เหนือ LoadoutBar = วางใน Slot สำเร็จ
+		-- ถ้ามี targetLoadoutSlot = สลับตำแหน่ง
+		-- ถ้าไม่ = คืนกลับไปที่ LoadoutBar
+		if placement and placement.valid and not placement.isOverLoadoutBar then
+			finishDrag(true)
+		elseif not dragContext.isFromSlot and dragContext.targetLoadoutSlot and dragContext.targetLoadoutSlot ~= dragContext.ghost then
+			finishDrag(true) -- จะเข้า swap case ใน finishDrag
+		else
+			finishDrag(false)
+		end
+	end
+end
+
+local function beginLoadoutDrag(sourceFrame: Frame, config: LoadoutConfig)
+	if not customizeScreenGui or dragContext.active then
+		return
+	end
+
+	cancelActiveDrag()
+
+	dragContext.active = true
+	dragContext.config = config
+	dragContext.ghost = sourceFrame
+	dragContext.originalParent = sourceFrame.Parent
+	dragContext.originalLayoutOrder = sourceFrame.LayoutOrder
+	dragContext.isFromSlot = false
+	dragContext.occupiedCells = nil
+	if not dragContext.originalParent then
+		dragContext.originalParent = loadoutBarFrame
+	end
+
+	local placeholder = Instance.new("Frame")
+	placeholder.Name = sourceFrame.Name .. "_Placeholder"
+	placeholder.Size = sourceFrame.Size
+	placeholder.BackgroundTransparency = 1
+	placeholder.BorderSizePixel = 0
+	placeholder.LayoutOrder = sourceFrame.LayoutOrder
+	if dragContext.originalParent then
+		placeholder.Parent = dragContext.originalParent
+		dragContext.placeholder = placeholder
+	else
+		placeholder:Destroy()
+		dragContext.placeholder = nil
+	end
+
+	sourceFrame.Parent = customizeScreenGui
+	sourceFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+	sourceFrame.Active = false
+	sourceFrame.Selectable = false
+
+	local baseWidth = (SLOT_CELL_SIZE.X + SLOT_CELL_PADDING.X) * config.size.X - SLOT_CELL_PADDING.X
+	local baseHeight = (SLOT_CELL_SIZE.Y + SLOT_CELL_PADDING.Y) * config.size.Y - SLOT_CELL_PADDING.Y
+	sourceFrame.Size = UDim2.fromOffset(baseWidth, baseHeight)
+
+	setGuiTreeZIndex(sourceFrame, 200)
+
+	local mouseLocation = UserInputService:GetMouseLocation()
+	updateDragState(mouseLocation)
+
+	dragContext.connections = {
+		UserInputService.InputChanged:Connect(handleDragInputChanged),
+		UserInputService.InputEnded:Connect(handleDragInputEnded),
+	}
+end
+
+beginSlotItemDrag = function(sourceFrame: Frame)
+	if not customizeScreenGui or dragContext.active then
+		return
+	end
+
+	-- ดึงข้อมูล config จาก attribute
+	local itemId = sourceFrame:GetAttribute("ItemId")
+	local topRow = sourceFrame:GetAttribute("TopRow")
+	local topColumn = sourceFrame:GetAttribute("TopColumn")
+
+	if not itemId or not topRow or not topColumn then
+		warn("[CustomizeUI] Cannot drag: missing item attributes")
+		return
+	end
+
+	-- หา config ที่ตรงกับ itemId
+	local config: LoadoutConfig? = nil
+	for _, cfg in ipairs(loadoutConfigs) do
+		if cfg.id == itemId then
+			config = cfg
+			break
+		end
+	end
+
+	if not config then
+		warn("[CustomizeUI] Cannot drag: config not found for", itemId)
+		return
+	end
+
+	cancelActiveDrag()
+
+	-- เก็บข้อมูล cells ที่ item นี้ครอบครอง
+	local occupiedCells: { SlotData } = {}
+	local endRow = topRow + config.size.Y - 1
+	local endColumn = topColumn + config.size.X - 1
+
+	for row = topRow, endRow do
+		for column = topColumn, endColumn do
+			local cell = slotMap[row][column]
+			if cell then
+				table.insert(occupiedCells, cell)
+			end
+		end
+	end
+
+	dragContext.active = true
+	dragContext.config = config
+	dragContext.ghost = sourceFrame
+	dragContext.originalParent = sourceFrame.Parent
+	dragContext.isFromSlot = true
+	dragContext.occupiedCells = occupiedCells
+
+	-- ลบ item ออกจาก slot occupancy ชั่วคราว
+	for _, cell in ipairs(occupiedCells) do
+		if slotOccupancy[cell.row] then
+			slotOccupancy[cell.row][cell.column] = nil
+		end
+	end
+
+	sourceFrame.Parent = customizeScreenGui
+	sourceFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+	sourceFrame.Active = false
+	sourceFrame.Selectable = false
+
+	setGuiTreeZIndex(sourceFrame, 200)
+
+	local mouseLocation = UserInputService:GetMouseLocation()
+	updateDragState(mouseLocation)
+
+	dragContext.connections = {
+		UserInputService.InputChanged:Connect(handleDragInputChanged),
+		UserInputService.InputEnded:Connect(handleDragInputEnded),
+	}
+end
+
+createLoadoutSlot = function(config: LoadoutConfig, index: number): Frame
+	if not loadoutBarFrame then
+		error("[CustomizeUI] loadoutBarFrame is not initialized")
+	end
+
+	local itemFrame = Instance.new("Frame")
+	itemFrame.Name = string.format("LoadoutSlot%d", index)
+	itemFrame.Size = UDim2.new(0, SLOT_CELL_SIZE.X, 0, SLOT_CELL_SIZE.Y)
+	itemFrame.BackgroundColor3 = Color3.fromRGB(58, 62, 77)
+	itemFrame.BackgroundTransparency = 0.08
+	itemFrame.BorderSizePixel = 0
+	itemFrame.ZIndex = (loadoutBarFrame.ZIndex or 1) + 1
+	itemFrame.Active = true
+	itemFrame.LayoutOrder = index
+	itemFrame.Parent = loadoutBarFrame
+	itemFrame:SetAttribute("ItemId", config.id)
+
+
+	local itemLabel = Instance.new("TextLabel")
+	itemLabel.Name = "Label"
+	itemLabel.Size = UDim2.new(1, -8, 1, -8)
+	itemLabel.Position = UDim2.new(0.5, 0, 0.5, 0)
+	itemLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+	itemLabel.BackgroundTransparency = 1
+	itemLabel.Font = Enum.Font.GothamMedium
+	itemLabel.Text = config.displayName
+	itemLabel.TextColor3 = Color3.fromRGB(220, 224, 233)
+	itemLabel.TextScaled = true
+	itemLabel.TextWrapped = true
+	itemLabel.ZIndex = itemFrame.ZIndex + 1
+	itemLabel.Parent = itemFrame
+
+	local slotConfig = config
+	itemFrame.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			beginLoadoutDrag(itemFrame, slotConfig)
+		end
+	end)
+
+	return itemFrame
+end
+
+rebuildLoadoutItems = function()
+	if not loadoutBarFrame then
+		return
+	end
+
+	print("[CustomizeUI] rebuildLoadoutItems called")
+
+	for _, child in ipairs(loadoutBarFrame:GetChildren()) do
+		if child:IsA("Frame") then
+			local name = child.Name
+			if string.find(name, "LoadoutSlot") or string.find(name, "_Placeholder") then
+				child:Destroy()
+			end
+		end
+	end
+
+	-- ทำความสะอาด placedItems - ลบ items ที่ถูก destroy หรือไม่มี parent แล้ว
+	local validPlacedItems: { GuiObject } = {}
+	for _, placedItem in ipairs(placedItems) do
+		if placedItem and placedItem.Parent then
+			table.insert(validPlacedItems, placedItem)
+		else
+			print("[CustomizeUI] - Removing invalid item from placedItems")
+		end
+	end
+	placedItems = validPlacedItems
+
+	-- สร้าง set ของ ItemId ที่ถูกวางใน Slots แล้ว
+	local placedItemIds: { [string]: boolean } = {}
+	for _, placedItem in ipairs(placedItems) do
+		local itemId = placedItem:GetAttribute("ItemId")
+		if itemId then
+			placedItemIds[itemId] = true
+			print("[CustomizeUI] - Item in slot:", itemId)
+		end
+	end
+
+	print("[CustomizeUI] Total items in slots:", #placedItems)
+
+	-- สร้างเฉพาะ items ที่ยังไม่ถูกวางใน Slots
+	local slotIndex = 1
+	for _, config in ipairs(loadoutConfigs) do
+		if not placedItemIds[config.id] then
+			print("[CustomizeUI] - Creating slot for:", config.id)
+			createLoadoutSlot(config, slotIndex)
+			slotIndex = slotIndex + 1
+		else
+			print("[CustomizeUI] - Skipping (already in slot):", config.id)
+		end
+	end
+
+	print("[CustomizeUI] rebuildLoadoutItems complete, created", slotIndex - 1, "items")
+end
+
 -- ฟังก์ชันสร้าง Customize UI
 local function createCustomizeUI()
 	if customizeScreenGui then return customizeScreenGui end
@@ -88,118 +975,184 @@ local function createCustomizeUI()
 	customizeScreenGui.Enabled = false
 	customizeScreenGui.Parent = playerGui
 
-	-- สร้าง Background (มืดๆ ด้านหลัง)
-	local background = Instance.new("Frame")
-	background.Name = "Background"
-	background.Size = UDim2.new(1, 0, 1, 0)
-	background.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-	background.BackgroundTransparency = 0.5
-	background.BorderSizePixel = 0
-	background.Parent = customizeScreenGui
+	initializeSlotState()
 
-	-- สร้าง Main Frame
-	customizeFrame = Instance.new("Frame")
-	customizeFrame.Name = "CustomizeFrame"
-	customizeFrame.Size = UDim2.new(0.7, 0, 0.85, 0)
-	customizeFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-	customizeFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-	customizeFrame.BackgroundColor3 = Color3.fromRGB(238, 240, 245)
-	customizeFrame.BorderSizePixel = 0
-	customizeFrame.Parent = customizeScreenGui
-
-	local frameStroke = Instance.new("UIStroke")
-	frameStroke.Color = Color3.fromRGB(205, 208, 220)
-	frameStroke.Thickness = 1
-	frameStroke.Parent = customizeFrame
-
-	-- สร้าง Top Bar
-	local topBar = Instance.new("Frame")
-	topBar.Name = "TopBar"
-	topBar.Size = UDim2.new(1, 0, 0.12, 0)
-	topBar.BackgroundColor3 = Color3.fromRGB(101, 105, 115)
-	topBar.BorderSizePixel = 0
-	topBar.Parent = customizeFrame
-
-	local topPadding = Instance.new("UIPadding")
-	topPadding.PaddingLeft = UDim.new(0.025, 0)
-	topPadding.PaddingRight = UDim.new(0.025, 0)
-	topPadding.Parent = topBar
-
-	local titleLabel = Instance.new("TextLabel")
-	titleLabel.Name = "SectionTitle"
-	titleLabel.Size = UDim2.new(0.2, 0, 1, 0)
-	titleLabel.BackgroundTransparency = 1
-	titleLabel.Font = Enum.Font.GothamBold
-	titleLabel.Text = "Customize"
-	titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	titleLabel.TextSize = 28
-	titleLabel.TextScaled = true
-	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-	titleLabel.Parent = topBar
-
-	local brandLabel = Instance.new("TextLabel")
-	brandLabel.Name = "Brand"
-	brandLabel.Size = UDim2.new(0.3, 0, 1, 0)
-	brandLabel.Position = UDim2.new(0.5, 0, 0, 0)
-	brandLabel.AnchorPoint = Vector2.new(0.5, 0)
-	brandLabel.BackgroundTransparency = 1
-	brandLabel.Font = Enum.Font.GothamBold
-	brandLabel.Text = "Rescue Blox"
-	brandLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	brandLabel.TextSize = 30
-	brandLabel.TextScaled = true
-	brandLabel.TextXAlignment = Enum.TextXAlignment.Center
-	brandLabel.Parent = topBar
-
-	local closeButton = Instance.new("TextButton")
-	closeButton.Name = "CloseButton"
-	closeButton.Size = UDim2.new(0.045, 0, 0.45, 0)
-	closeButton.Position = UDim2.new(1, 0, 0.5, 0)
-	closeButton.AnchorPoint = Vector2.new(1, 0.5)
-	closeButton.BackgroundColor3 = Color3.fromRGB(236, 241, 246)
-	closeButton.BorderSizePixel = 0
-	closeButton.Font = Enum.Font.GothamBold
-	closeButton.Text = "X"
-	closeButton.TextColor3 = Color3.fromRGB(80, 88, 103)
-	closeButton.TextSize = 18
-	closeButton.TextScaled = true
-	closeButton.Parent = topBar
-
-	local closeCorner = Instance.new("UICorner")
-	closeCorner.CornerRadius = UDim.new(0.2, 0)
-	closeCorner.Parent = closeButton
-
-	local closeStroke = Instance.new("UIStroke")
-	closeStroke.Color = Color3.fromRGB(198, 203, 215)
-	closeStroke.Thickness = 1
-	closeStroke.Parent = closeButton
-
-	-- เชื่อมปุ่มปิด
-	closeButton.MouseButton1Click:Connect(function()
-		CustomizeUI.closeCustomize()
-	end)
-
-	-- สร้าง Content Area
+	-- Content root (ใช้จัดตำแหน่ง UI)
 	local contentFrame = Instance.new("Frame")
 	contentFrame.Name = "Content"
-	contentFrame.Size = UDim2.new(0.96, 0, 0.82, 0)
-	contentFrame.Position = UDim2.new(0.02, 0, 0.16, 0)
+	contentFrame.Size = UDim2.new(1, 0, 1, 0)
 	contentFrame.BackgroundTransparency = 1
 	contentFrame.BorderSizePixel = 0
-	contentFrame.Parent = customizeFrame
+	contentFrame.Parent = customizeScreenGui
 
-	-- Placeholder text
-	local placeholderLabel = Instance.new("TextLabel")
-	placeholderLabel.Size = UDim2.new(1, 0, 1, 0)
-	placeholderLabel.BackgroundTransparency = 1
-	placeholderLabel.Font = Enum.Font.GothamMedium
-	placeholderLabel.Text = "Customize options coming soon..."
-	placeholderLabel.TextColor3 = Color3.fromRGB(100, 100, 100)
-	placeholderLabel.TextSize = 24
-	placeholderLabel.Parent = contentFrame
+	-- Inventory panel (right side)
+	local inventoryPanel = Instance.new("Frame")
+	inventoryPanel.Name = "InventoryPanel"
+	inventoryPanel.Size = UDim2.new(0, 520, 0, 620)
+	inventoryPanel.Position = UDim2.new(1, -60, 0.08, 0)
+	inventoryPanel.AnchorPoint = Vector2.new(1, 0)
+	inventoryPanel.BackgroundColor3 = Color3.fromRGB(47, 51, 64)
+	inventoryPanel.BackgroundTransparency = 0.08
+	inventoryPanel.BorderSizePixel = 0
+	inventoryPanel.ZIndex = 5
+	inventoryPanel.Parent = contentFrame
+
+	local inventoryStroke = Instance.new("UIStroke")
+	inventoryStroke.Color = Color3.fromRGB(85, 90, 105)
+	inventoryStroke.Thickness = 1
+	inventoryStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	inventoryStroke.Parent = inventoryPanel
+
+	local inventoryHeader = Instance.new("Frame")
+	inventoryHeader.Name = "InventoryHeader"
+	inventoryHeader.Size = UDim2.new(1, 0, 0, 48)
+	inventoryHeader.BackgroundColor3 = Color3.fromRGB(30, 32, 42)
+	inventoryHeader.BackgroundTransparency = 0.2
+	inventoryHeader.BorderSizePixel = 0
+	inventoryHeader.ZIndex = inventoryPanel.ZIndex + 1
+	inventoryHeader.Parent = inventoryPanel
+
+	local inventoryLabel = Instance.new("TextLabel")
+	inventoryLabel.Name = "Title"
+	inventoryLabel.Size = UDim2.new(1, -20, 1, 0)
+	inventoryLabel.Position = UDim2.new(0, 12, 0, 0)
+	inventoryLabel.BackgroundTransparency = 1
+	inventoryLabel.Font = Enum.Font.GothamBold
+	inventoryLabel.Text = "Inventory"
+	inventoryLabel.TextColor3 = Color3.fromRGB(235, 237, 245)
+	inventoryLabel.TextSize = 28
+	inventoryLabel.TextXAlignment = Enum.TextXAlignment.Left
+	inventoryLabel.ZIndex = inventoryHeader.ZIndex + 1
+	inventoryLabel.Parent = inventoryHeader
+
+	local slotsContainer = Instance.new("Frame")
+	slotsContainer.Name = "Slots"
+	slotsContainer.Size = UDim2.new(1, -28, 1, -60)
+	slotsContainer.Position = UDim2.new(0.5, 0, 0, 60)
+	slotsContainer.AnchorPoint = Vector2.new(0.5, 0)
+	slotsContainer.BackgroundTransparency = 1
+	slotsContainer.ZIndex = inventoryPanel.ZIndex + 1
+	slotsContainer.Parent = inventoryPanel
+
+	local slotsLayout = Instance.new("UIGridLayout")
+	slotsLayout.CellSize = UDim2.new(0, SLOT_CELL_SIZE.X, 0, SLOT_CELL_SIZE.Y)
+	slotsLayout.CellPadding = UDim2.new(0, SLOT_CELL_PADDING.X, 0, SLOT_CELL_PADDING.Y)
+	slotsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	slotsLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+	slotsLayout.StartCorner = Enum.StartCorner.TopLeft
+	slotsLayout.FillDirectionMaxCells = SLOT_COLUMNS
+	slotsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	slotsLayout.Parent = slotsContainer
+
+	for index = 1, SLOT_COLUMNS * SLOT_ROWS do
+		local gridColumn = (index - 1) % SLOT_COLUMNS
+		local gridRow = math.floor((index - 1) / SLOT_COLUMNS)
+		local row = gridRow + 1
+		local column = gridColumn + 1
+		local isStarterSlot = gridRow < 2 and gridColumn < 2
+
+		local slot = Instance.new("Frame")
+		slot.Name = string.format("Slot%d", index)
+		slot.BackgroundColor3 = Color3.fromRGB(58, 62, 77)
+		slot.BackgroundTransparency = isStarterSlot and 0.05 or 0.35
+		slot.BorderSizePixel = 0
+		slot.ZIndex = slotsContainer.ZIndex + 1
+		slot.Active = true
+		slot.Parent = slotsContainer
+
+		local slotStroke = Instance.new("UIStroke")
+		slotStroke.Color = isStarterSlot and Color3.fromRGB(94, 99, 115) or Color3.fromRGB(64, 68, 82)
+		slotStroke.Thickness = 1
+		slotStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		slotStroke.Parent = slot
+
+		if isStarterSlot then
+			local levelLabel = Instance.new("TextLabel")
+			levelLabel.Name = "LevelTag"
+			levelLabel.Size = UDim2.new(1, 0, 1, 0)
+			levelLabel.BackgroundTransparency = 1
+			levelLabel.Font = Enum.Font.GothamBold
+			levelLabel.Text = "LV1"
+			levelLabel.TextSize = 10
+			levelLabel.TextColor3 = Color3.fromRGB(215, 218, 228)
+			levelLabel.ZIndex = slot.ZIndex + 1
+			levelLabel.Visible = true
+			levelLabel.Parent = slot
+		end
+
+		local slotData: SlotData = {
+			frame = slot,
+			row = row,
+			column = column,
+			defaultColor = slot.BackgroundColor3,
+			defaultTransparency = slot.BackgroundTransparency,
+			stroke = slotStroke,
+			defaultStrokeColor = slotStroke.Color,
+		}
+
+		inventorySlots[#inventorySlots + 1] = slotData
+		slotMap[row][column] = slotData
+	end
+
+	local slotsOverlay = Instance.new("Frame")
+	slotsOverlay.Name = "SlotsOverlay"
+	slotsOverlay.Size = slotsContainer.Size
+	slotsOverlay.Position = slotsContainer.Position
+	slotsOverlay.AnchorPoint = slotsContainer.AnchorPoint
+	slotsOverlay.BackgroundTransparency = 1
+	slotsOverlay.BorderSizePixel = 0
+	slotsOverlay.ZIndex = slotsContainer.ZIndex + 5
+	slotsOverlay.ClipsDescendants = false
+	slotsOverlay.Parent = inventoryPanel
+	slotsOverlayFrame = slotsOverlay
+
+	-- Loadout bar at bottom
+	local loadoutBar = Instance.new("Frame")
+	loadoutBar.Name = "LoadoutBar"
+	loadoutBar.Size = UDim2.new(0, 520, 0, 120)
+	loadoutBar.Position = UDim2.new(0.5, 0, 0.95, 0)
+	loadoutBar.AnchorPoint = Vector2.new(0.5, 1)
+	loadoutBar.BackgroundColor3 = Color3.fromRGB(46, 50, 64)
+	loadoutBar.BackgroundTransparency = 1
+	loadoutBar.BorderSizePixel = 0
+	loadoutBar.ZIndex = inventoryPanel.ZIndex + 1
+	loadoutBar.Parent = contentFrame
+	loadoutBarFrame = loadoutBar
+
+	local loadoutPadding = Instance.new("UIPadding")
+	loadoutPadding.PaddingLeft = UDim.new(0, 20)
+	loadoutPadding.PaddingRight = UDim.new(0, 20)
+	loadoutPadding.PaddingTop = UDim.new(0, 15)
+	loadoutPadding.PaddingBottom = UDim.new(0, 15)
+	loadoutPadding.Parent = loadoutBar
+
+	local loadoutLayout = Instance.new("UIListLayout")
+	loadoutLayout.FillDirection = Enum.FillDirection.Horizontal
+	loadoutLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	loadoutLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	loadoutLayout.Padding = UDim.new(0, 16)
+	loadoutLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	loadoutLayout.Parent = loadoutBar
+
+	rebuildLoadoutItems()
 
 	print("Customize UI created successfully")
 	return customizeScreenGui
+end
+
+local function showCustomizeUI()
+	local screenGui = createCustomizeUI()
+	if screenGui then
+		screenGui.Enabled = true
+	end
+end
+
+local function hideCustomizeUI()
+	if customizeScreenGui then
+		customizeScreenGui.Enabled = false
+	end
+
+	cancelActiveDrag()
 end
 
 -- ฟังก์ชัน Clone Rescue Bot และวางบน Garage.Base
@@ -371,12 +1324,14 @@ local function panCameraToGarage()
 	local garage = Workspace:FindFirstChild("Garage")
 	if not garage then
 		warn("[CustomizeUI] ไม่พบ Garage")
+		showCustomizeUI()
 		return
 	end
 
 	local garageCamera = garage:FindFirstChild("Camera")
 	if not garageCamera then
 		warn("[CustomizeUI] ไม่พบ Garage.Camera")
+		showCustomizeUI()
 		return
 	end
 
@@ -400,6 +1355,11 @@ local function panCameraToGarage()
 
 	-- Setup rotation controls หลัง tween เสร็จ
 	cameraTween.Completed:Connect(function()
+		if not isCustomizeOpen then
+			return
+		end
+
+		showCustomizeUI()
 		setupCameraRotation()
 	end)
 
@@ -443,6 +1403,10 @@ function CustomizeUI.openCustomize()
 
 	isCustomizeOpen = true
 
+	hideCustomizeUI()
+	createCustomizeUI()
+	clearInventoryPlacements()
+
 	-- ซ่อน Player List (GUI มุมขวาบน)
 	game:GetService("StarterGui"):SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
 
@@ -464,6 +1428,8 @@ function CustomizeUI.closeCustomize()
 
 	-- Cleanup preview bot และคืนกล้อง
 	cleanupPreview()
+
+	hideCustomizeUI()
 
 	-- Deselect TopbarPlus icon
 	if customizeIcon then
