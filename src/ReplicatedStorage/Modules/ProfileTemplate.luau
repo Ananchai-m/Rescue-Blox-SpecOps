@@ -48,7 +48,7 @@ export type PlayerProfile = {
 		coins: number
 	},
 	bot: {
-		colors: { [string]: string },
+		colors: { [string]: { r: number, g: number, b: number } },
 		slotsUnlocked: number,
 		inventory: {
 			owned: { [string]: InventoryItem },
@@ -95,13 +95,7 @@ function ProfileTemplate.new(player: Player): PlayerProfile
 			coins = 0
 		},
 		bot = {
-			colors = {
-				body = "#FFFFFF",
-				camera = "#FF0000",
-				wheel = "#0000FF",
-				arm = "#00FF00",
-				drill = "#FFFF00"
-			},
+			colors = {},
 			slotsUnlocked = 4,
 			inventory = {
 				owned = {

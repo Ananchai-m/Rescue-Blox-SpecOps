@@ -30,7 +30,7 @@ type ProfileServiceType = {
 	AddCoins: (self: ProfileServiceType, player: Player, amount: number) -> boolean,
 	RemoveCoins: (self: ProfileServiceType, player: Player, amount: number) -> boolean,
 	AddXP: (self: ProfileServiceType, player: Player, amount: number) -> (),
-	SetBotColor: (self: ProfileServiceType, player: Player, part: string, color: string) -> (),
+	SetBotColor: (self: ProfileServiceType, player: Player, part: string, color: any) -> (),
 	AddRescue: (self: ProfileServiceType, player: Player) -> (),
 	UpdateMission: (self: ProfileServiceType, player: Player, missionId: string, state: string, bestTime: number?) -> (),
 	UpdateBestTime: (self: ProfileServiceType, player: Player, buildingId: string, time: number) -> (),
@@ -50,6 +50,23 @@ function ProfileService.new(): ProfileServiceType
 	self._autoSaveRunning = false
 
 	return self
+end
+
+local function getEquippedEntryId(entry: any): string?
+	if typeof(entry) == "string" then
+		return entry
+	elseif typeof(entry) == "table" then
+		return entry.id :: string?
+	end
+	return nil
+end
+
+local function makeEquippedEntry(itemId: string): ProfileTemplate.EquippedItem
+	return {
+		id = itemId,
+		row = 1,
+		column = 1,
+	}
 end
 
 -- ดึง Profile ของผู้เล่น (จาก cache)
@@ -201,11 +218,44 @@ function ProfileService:AddXP(player: Player, amount: number)
 end
 
 -- ตั้งสีของหุ่นยนต์
-function ProfileService:SetBotColor(player: Player, part: string, color: string)
+function ProfileService:SetBotColor(player: Player, part: string, color: any)
 	local profile: PlayerProfile? = self._profiles[player.UserId]
 	if not profile then return end
 
-	profile.bot.colors[part] = color
+	local colorData
+	if typeof(color) == "Color3" then
+		colorData = { r = color.R, g = color.G, b = color.B }
+	elseif typeof(color) == "string" then
+		if color:sub(1, 1) == "#" and (#color == 7 or #color == 9) then
+			local hex = color:sub(2)
+			local value = tonumber(hex, 16)
+			if value then
+				local r = math.floor(value / 0x10000) % 0x100
+				local g = math.floor(value / 0x100) % 0x100
+				local b = value % 0x100
+				r = r / 255
+				g = g / 255
+				b = b / 255
+				colorData = { r = r, g = g, b = b }
+			end
+		end
+	elseif typeof(color) == "table" then
+		local r = color.r or color.R or color[1]
+		local g = color.g or color.G or color[2]
+		local b = color.b or color.B or color[3]
+		if typeof(r) == "number" and typeof(g) == "number" and typeof(b) == "number" then
+			r = math.clamp(r, 0, 1)
+			g = math.clamp(g, 0, 1)
+			b = math.clamp(b, 0, 1)
+			colorData = { r = r, g = g, b = b }
+		end
+	end
+
+	if colorData then
+		profile.bot.colors[part] = colorData
+	else
+		profile.bot.colors[part] = nil
+	end
 end
 
 -- เพิ่มจำนวนผู้ประสบภัยที่ช่วยแล้ว
@@ -267,16 +317,21 @@ function ProfileService:EquipItem(player: Player, itemId: string): boolean
 	if not item then return false end
 
 	-- ตรวจสอบว่าติดตั้งอยู่แล้วหรือยัง
-	if table.find(profile.bot.inventory.equipped, itemId) then
-		return false -- ติดตั้งอยู่แล้ว
+	for _, entry in ipairs(profile.bot.inventory.equipped) do
+		if getEquippedEntryId(entry) == itemId then
+			return false
+		end
 	end
 
 	-- คำนวณ slot ที่ใช้อยู่
 	local slotsUsed = 0
-	for _, equippedId in ipairs(profile.bot.inventory.equipped) do
-		local equippedItem = profile.bot.inventory.owned[equippedId]
-		if equippedItem then
-			slotsUsed += equippedItem.slotCost
+	for _, entry in ipairs(profile.bot.inventory.equipped) do
+		local equippedId = getEquippedEntryId(entry)
+		if equippedId then
+			local equippedItem = profile.bot.inventory.owned[equippedId]
+			if equippedItem then
+				slotsUsed += equippedItem.slotCost
+			end
 		end
 	end
 
@@ -286,7 +341,7 @@ function ProfileService:EquipItem(player: Player, itemId: string): boolean
 	end
 
 	-- ติดตั้ง
-	table.insert(profile.bot.inventory.equipped, itemId)
+	table.insert(profile.bot.inventory.equipped, makeEquippedEntry(itemId))
 	return true
 end
 
@@ -295,7 +350,13 @@ function ProfileService:UnequipItem(player: Player, itemId: string): boolean
 	local profile: PlayerProfile? = self._profiles[player.UserId]
 	if not profile then return false end
 
-	local index = table.find(profile.bot.inventory.equipped, itemId)
+	local index
+	for i, entry in ipairs(profile.bot.inventory.equipped) do
+		if getEquippedEntryId(entry) == itemId then
+			index = i
+			break
+		end
+	end
 	if not index then return false end
 
 	table.remove(profile.bot.inventory.equipped, index)

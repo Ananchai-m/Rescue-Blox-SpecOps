@@ -59,6 +59,71 @@ local GameConfig = require(ReplicatedStorage.Modules.GameConfig)
 local GameSummary = require(ReplicatedStorage.Modules.GameSummary)
 local RescueBotHealth = require(ReplicatedStorage.Modules.RescueBotHealth)
 
+local function toColor3(colorData)
+	if typeof(colorData) == "Color3" then
+		return colorData
+	elseif typeof(colorData) == "table" then
+		local r = colorData.r or colorData.R or colorData[1]
+		local g = colorData.g or colorData.G or colorData[2]
+		local b = colorData.b or colorData.B or colorData[3]
+		if typeof(r) == "number" and typeof(g) == "number" and typeof(b) == "number" then
+			r = math.clamp(r, 0, 1)
+			g = math.clamp(g, 0, 1)
+			b = math.clamp(b, 0, 1)
+			return Color3.new(r, g, b)
+		end
+	end
+
+	return nil
+end
+
+local function findPartByPath(model: Instance?, path: string): BasePart?
+	if not model or not path or path == "" then
+		return nil
+	end
+
+	local current: Instance? = model
+	for _, segment in ipairs(string.split(path, "/")) do
+		if not current then
+			return nil
+		end
+		current = current:FindFirstChild(segment)
+		if not current then
+			return nil
+		end
+	end
+
+	if current and current:IsA("BasePart") and not current:IsA("Seat") and current.Name ~= "VehicleSeat" then
+		return current
+	end
+
+	return nil
+end
+
+local function applyColorSchemeToModel(model: Model?, colorScheme: {{path: string, color: any}}?)
+	if not model or not colorScheme then
+		return
+	end
+
+	for _, entry in ipairs(colorScheme) do
+		if typeof(entry) == "table" then
+			local path = entry.path
+			local color = toColor3(entry.color)
+			if typeof(path) == "string" and color then
+				local part = findPartByPath(model, path)
+				if part then
+					part.Color = color
+				end
+			end
+		end
+	end
+end
+
+local function getPlayerColorScheme(player: Player)
+	local profile = profileService:GetProfile(player)
+	return profile and profile.bot and profile.bot.colors or nil
+end
+
 -- ปิดการนั่งใน VehicleSeat ทั้งหมด
 local function disableVehicleSeats()
 	for _, descendant in ipairs(workspace:GetDescendants()) do
@@ -435,6 +500,10 @@ spawnCompanionEvent.OnServerEvent:Connect(function(player, position, orientation
 
 	local profile = profileService:GetProfile(player)
 	local equippedItems = profile and profile.bot and profile.bot.inventory and profile.bot.inventory.equipped or {}
+	local colorScheme = profile and profile.bot and profile.bot.colors
+	if colorScheme then
+		applyColorSchemeToModel(companion, colorScheme)
+	end
 	CompanionEquipment.apply(companion, equippedItems)
 	foldDrillArm(companion, player.Name, "Companion")
 
@@ -1049,6 +1118,11 @@ spawnOriginalRescueEvent.OnServerEvent:Connect(function(player, position)
 		end
 	end
 
+	local rescueColorScheme = getPlayerColorScheme(player)
+	if rescueColorScheme then
+		applyColorSchemeToModel(originalRescueModel, rescueColorScheme)
+	end
+
 	playerOriginalRescue[player] = originalRescueModel
 
 	-- สร้าง RescueBotHealth instance
@@ -1061,24 +1135,28 @@ spawnOriginalRescueEvent.OnServerEvent:Connect(function(player, position)
 	-- โหลด equipped items จาก profile
 	task.spawn(function()
 		local profile = profileService:GetProfile(player)
-		if profile and profile.bot and profile.bot.inventory then
-			local equippedItems = profile.bot.inventory.equipped
-			if equippedItems and #equippedItems > 0 then
-				-- ตั้งค่า target bot สำหรับ EquipmentManager
-				EquipmentManager.setTargetBot(originalRescueModel)
+		if profile then
+			if profile.bot and profile.bot.inventory then
+				local equippedItems = profile.bot.inventory.equipped
+				if equippedItems and #equippedItems > 0 then
+					-- ตั้งค่า target bot สำหรับ EquipmentManager
+					EquipmentManager.setTargetBot(originalRescueModel)
 
-				-- Equip items ทั้งหมดที่อยู่ใน profile
-				for _, equippedItem in ipairs(equippedItems) do
-					local itemId = equippedItem.id
-					local success = EquipmentManager.equipItem(itemId)
-					if success then
-						print("[RescueBotServer] Equipped", itemId, "for", player.Name)
-					else
-						warn("[RescueBotServer] Failed to equip", itemId, "for", player.Name)
+					-- Equip items ทั้งหมดที่อยู่ใน profile
+					for _, equippedItem in ipairs(equippedItems) do
+						local itemId = equippedItem.id
+						local success = EquipmentManager.equipItem(itemId)
+						if success then
+							print("[RescueBotServer] Equipped", itemId, "for", player.Name)
+						else
+							warn("[RescueBotServer] Failed to equip", itemId, "for", player.Name)
+						end
 					end
+				else
+					print("[RescueBotServer] No equipped items found for", player.Name)
 				end
 			else
-				print("[RescueBotServer] No equipped items found for", player.Name)
+				print("[RescueBotServer] No inventory data for", player.Name)
 			end
 		else
 			warn("[RescueBotServer] Profile not found for", player.Name)

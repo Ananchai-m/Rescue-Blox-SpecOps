@@ -3,12 +3,160 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local Players = game:GetService("Players")
 
 local CustomizeService = require(ReplicatedStorage.Modules.CustomizeService)
 local CompanionEquipment = require(ReplicatedStorage.Modules.CompanionEquipment)
 
 -- ใช้ Shared ProfileService instance
 local profileService = require(ServerScriptService.SharedProfileService)
+
+local function toColor3(colorData)
+	if typeof(colorData) == "table" then
+		local r = colorData.r or colorData.R or colorData[1]
+		local g = colorData.g or colorData.G or colorData[2]
+		local b = colorData.b or colorData.B or colorData[3]
+		if typeof(r) == "number" and typeof(g) == "number" and typeof(b) == "number" then
+			r = math.clamp(r, 0, 1)
+			g = math.clamp(g, 0, 1)
+			b = math.clamp(b, 0, 1)
+			return Color3.new(r, g, b)
+		end
+	elseif typeof(colorData) == "string" then
+		if colorData:sub(1, 1) == "#" and (#colorData == 7 or #colorData == 9) then
+			local hex = colorData:sub(2)
+			local value = tonumber(hex, 16)
+			if value then
+				local r = math.floor(value / 0x10000) % 0x100
+				local g = math.floor(value / 0x100) % 0x100
+				local b = value % 0x100
+				r = r / 255
+				g = g / 255
+				b = b / 255
+				return Color3.new(r, g, b)
+			end
+		end
+	elseif typeof(colorData) == "Color3" then
+		return colorData
+	end
+
+	return nil
+end
+
+local function findPartByPath(model: Instance?, path: string): BasePart?
+	if not model or not path or path == "" then
+		return nil
+	end
+
+	local current: Instance? = model
+	for _, segment in ipairs(string.split(path, "/")) do
+		if not current then
+			return nil
+		end
+		current = current:FindFirstChild(segment)
+		if not current then
+			return nil
+		end
+	end
+
+	if current and current:IsA("BasePart") and not current:IsA("Seat") and current.Name ~= "VehicleSeat" then
+		return current
+	end
+
+	return nil
+end
+
+local function applyColorSchemeToModel(model: Model?, colorScheme: any)
+	if not model or not colorScheme then
+		return
+	end
+
+	if typeof(colorScheme) ~= "table" then
+		return
+	end
+
+	if colorScheme[1] and typeof(colorScheme[1]) == "table" and colorScheme[1].path then
+		for _, entry in ipairs(colorScheme) do
+			local path = entry.path
+			local color = toColor3(entry.color)
+			if typeof(path) == "string" and color then
+				local part = findPartByPath(model, path)
+				if part then
+					part.Color = color
+				end
+			end
+		end
+	else
+		for path, colorData in pairs(colorScheme) do
+			if typeof(path) == "string" then
+				local color = toColor3(colorData)
+				if color then
+					local part = findPartByPath(model, path)
+					if part then
+						part.Color = color
+					end
+				end
+			end
+		end
+	end
+end
+
+local function sanitizeColorScheme(colorScheme: any): {[string]: {r: number, g: number, b: number}}
+	local sanitized: {[string]: {r: number, g: number, b: number}} = {}
+	if typeof(colorScheme) ~= "table" then
+		return sanitized
+	end
+
+	if colorScheme[1] and typeof(colorScheme[1]) == "table" and colorScheme[1].path then
+		for _, entry in ipairs(colorScheme) do
+			if typeof(entry.path) == "string" and entry.path ~= "" then
+				local c3 = toColor3(entry.color)
+				if c3 then
+					sanitized[entry.path] = { r = c3.R, g = c3.G, b = c3.B }
+				end
+			end
+		end
+	else
+		for path, color in pairs(colorScheme) do
+			if typeof(path) == "string" and path ~= "" then
+				local c3 = toColor3(color)
+				if c3 then
+					sanitized[path] = { r = c3.R, g = c3.G, b = c3.B }
+				end
+			end
+		end
+	end
+
+	return sanitized
+end
+
+local function applyColorSchemeForPlayer(player: Player, colorScheme: any)
+	if not colorScheme then
+		return
+	end
+
+	if typeof(colorScheme) == "table" then
+		if colorScheme[1] and #colorScheme == 0 then
+			return
+		elseif not colorScheme[1] and next(colorScheme) == nil then
+			return
+		end
+	else
+		return
+	end
+
+	local rescueModel = workspace:FindFirstChild(player.Name .. "_Rescue")
+	if rescueModel and rescueModel:IsA("Model") then
+		applyColorSchemeToModel(rescueModel, colorScheme)
+	end
+
+	local companionModel = workspace:FindFirstChild(player.Name .. "_RescueCompanion")
+	if companionModel and companionModel:IsA("Model") then
+		applyColorSchemeToModel(companionModel, colorScheme)
+	end
+end
+
+local shouldSaveProfile: {[Player]: boolean} = {}
 
 -- รับและบันทึก equipped items
 CustomizeService.onSaveEquipment(function(player: Player, equippedItems: {{id: string, row: number, column: number}})
@@ -27,13 +175,40 @@ CustomizeService.onSaveEquipment(function(player: Player, equippedItems: {{id: s
 	profile.bot.inventory.equipped = equippedItems
 	CompanionEquipment.applyForPlayer(player, equippedItems)
 
-	-- Save profile
-	local saveSuccess = profileService:SaveProfile(player)
-	if saveSuccess then
-		print("[CustomizeServer] Saved profile for", player.Name)
-	else
-		warn("[CustomizeServer] Failed to save profile for", player.Name)
+	shouldSaveProfile[player] = true
+end)
+
+CustomizeService.onSaveColorScheme(function(player: Player, colorScheme)
+	print("[CustomizeServer] Received color scheme from", player.Name)
+	local profile = profileService:GetProfile(player)
+	if not profile then
+		warn("[CustomizeServer] Profile not found for", player.Name)
+		return
 	end
+
+	local sanitized = sanitizeColorScheme(colorScheme)
+	if sanitized and next(sanitized) then
+		local entries = {}
+		for path, color in pairs(sanitized) do
+			entries[#entries + 1] = string.format("%s=(%.2f,%.2f,%.2f)", path, color.r, color.g, color.b)
+		end
+		print("[CustomizeServer] Saving color scheme:", entries)
+	else
+		print("[CustomizeServer] Color scheme empty (default colors)")
+	end
+	profile.bot = profile.bot or {}
+	profile.bot.colors = sanitized
+
+	applyColorSchemeForPlayer(player, sanitized)
+	shouldSaveProfile[player] = true
+end)
+
+CustomizeService.onGetColorScheme(function(player: Player)
+	local profile = profileService:GetProfile(player)
+	if not profile then
+		return nil
+	end
+	return profile.bot and profile.bot.colors
 end)
 
 -- ส่งรายการ equipped items กลับไปยัง client
@@ -47,6 +222,30 @@ CustomizeService.onGetEquipment(function(player: Player): {{id: string, row: num
 	end
 
 	return profile.bot.inventory.equipped
+end)
+
+local function flushProfileSave(player: Player)
+	if shouldSaveProfile[player] then
+		shouldSaveProfile[player] = nil
+		local success, err = pcall(function()
+			return profileService:SaveProfile(player)
+		end)
+		if success then
+			print("[CustomizeServer] Saved profile for", player.Name)
+		else
+			warn("[CustomizeServer] Failed to save profile for", player.Name, err)
+		end
+	end
+end
+
+Players.PlayerRemoving:Connect(function(player)
+	flushProfileSave(player)
+end)
+
+game:BindToClose(function()
+	for _, player in ipairs(Players:GetPlayers()) do
+		flushProfileSave(player)
+	end
 end)
 
 print("[CustomizeServer] Initialized")

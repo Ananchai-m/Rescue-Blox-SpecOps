@@ -35,7 +35,28 @@ local function onPlayerAdded(player: Player)
 		end
 		print(`     - Items Owned: {ownedCount}`)
 		print(`     - Items Equipped: {#profile.bot.inventory.equipped}`)
-		print(`     - Colors: Body={profile.bot.colors.body}, Camera={profile.bot.colors.camera}, Wheel={profile.bot.colors.wheel}, Arm={profile.bot.colors.arm}, Drill={profile.bot.colors.drill}`)
+		if profile.bot.colors and next(profile.bot.colors) then
+			local colorEntries = {}
+			for path, color in pairs(profile.bot.colors) do
+				local c3
+				if typeof(color) == "Color3" then
+					c3 = color
+				elseif typeof(color) == "table" then
+					local r = color.r or color.R or color[1]
+					local g = color.g or color.G or color[2]
+					local b = color.b or color.B or color[3]
+					if typeof(r) == "number" and typeof(g) == "number" and typeof(b) == "number" then
+						c3 = Color3.new(r, g, b)
+					end
+				end
+				if c3 then
+					colorEntries[#colorEntries + 1] = string.format("%s=(%.2f,%.2f,%.2f)", path, c3.R, c3.G, c3.B)
+				end
+			end
+			print("     - Colors: { " .. table.concat(colorEntries, ", ") .. " }")
+		else
+			print("     - Colors: default")
+		end
 		print(`  Best Building: {profile.stats.bestBuilding or "None"}`)
 
 		-- สามารถทำอะไรต่อได้ที่นี่ เช่น

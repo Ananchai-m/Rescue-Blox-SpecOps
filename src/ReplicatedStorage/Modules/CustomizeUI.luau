@@ -29,6 +29,59 @@ local previewBot = nil
 local originalCameraCFrame = nil
 local originalCameraType = nil
 
+local selectedPreviewPart: BasePart? = nil
+local previewSelectionBox: SelectionBox? = nil
+local colorPickerFrame: Frame? = nil
+local colorPickerButtons: {TextButton} = {}
+local activeColorButton: TextButton? = nil
+local colorPickerPartLabel: TextLabel? = nil
+local previewOriginalColors: {[BasePart]: Color3} = {}
+local previewDescendantConn: RBXScriptConnection? = nil
+local currentColorScheme: {{path: string, color: any}}? = nil
+
+local function isSelectablePart(part: BasePart): boolean
+	if part.Name == "VehicleSeat" or part:IsA("Seat") or part:IsA("VehicleSeat") then
+		return false
+	end
+
+	return part:IsA("BasePart") or part:IsA("MeshPart")
+end
+
+local function buildRobloxColorPalette(): {Color3}
+	local palette = {}
+	local seen: {[string]: boolean} = {}
+	local maxIndex = 127
+	for index = 0, maxIndex do
+		local ok, brick = pcall(BrickColor.palette, index)
+		if ok and brick then
+			local color = brick.Color
+			local key = string.format("%.3f_%.3f_%.3f", color.R, color.G, color.B)
+			if not seen[key] then
+				seen[key] = true
+				palette[#palette + 1] = color
+			end
+		end
+	end
+
+	-- fallback palette if BrickColor.palette not available
+	if #palette == 0 then
+		palette = {
+			Color3.fromRGB(255, 255, 255),
+			Color3.fromRGB(226, 155, 64),
+			Color3.fromRGB(196, 40, 28),
+			Color3.fromRGB(13, 105, 172),
+			Color3.fromRGB(27, 197, 141),
+			Color3.fromRGB(105, 64, 157),
+			Color3.fromRGB(99, 95, 98),
+			Color3.fromRGB(46, 52, 64),
+		}
+	end
+
+	return palette
+end
+
+local COLOR_PALETTE: {Color3} = buildRobloxColorPalette()
+
 -- ตัวแปรสำหรับ Camera Rotation
 local isDragging = false
 local lastMousePosition = nil
@@ -115,6 +168,491 @@ local rebuildLoadoutItems: (() -> ())?
 local beginSlotItemDrag: ((Frame) -> ())?
 local setGuiTreeZIndex: ((GuiObject, number) -> ())? = nil
 local updateSlotLabels: (() -> ())? = nil
+local updateColorPickerForPart: ((BasePart) -> ())?
+
+local function ensureSelectionBox()
+	if previewSelectionBox then
+		return previewSelectionBox
+	end
+
+	previewSelectionBox = Instance.new("SelectionBox")
+	previewSelectionBox.LineThickness = 0.03
+	previewSelectionBox.SurfaceTransparency = 0.7
+	previewSelectionBox.Color3 = Color3.fromRGB(255, 255, 255)
+	previewSelectionBox.SurfaceColor3 = Color3.fromRGB(255, 255, 255)
+	previewSelectionBox.Visible = true
+	previewSelectionBox.Name = "CustomizePreviewSelection"
+
+	return previewSelectionBox
+end
+
+local function clearActiveColorButton()
+	if activeColorButton then
+		local stroke = activeColorButton:FindFirstChild("SelectionStroke")
+		if stroke and stroke:IsA("UIStroke") then
+			stroke.Enabled = false
+		end
+		activeColorButton = nil
+	end
+end
+
+local function clearPreviewSelection()
+	selectedPreviewPart = nil
+	if previewSelectionBox then
+		previewSelectionBox.Adornee = nil
+		previewSelectionBox.Parent = nil
+	end
+	clearActiveColorButton()
+	if colorPickerFrame then
+		colorPickerFrame.Visible = false
+	end
+	if colorPickerPartLabel then
+		colorPickerPartLabel.Text = ""
+	end
+end
+
+local function setActiveColorButton(button: TextButton?)
+	if button == activeColorButton then
+		return
+	end
+
+	clearActiveColorButton()
+
+	if button then
+		local stroke = button:FindFirstChild("SelectionStroke")
+		if stroke and stroke:IsA("UIStroke") then
+			stroke.Enabled = true
+		end
+		activeColorButton = button
+	end
+end
+
+local function resetPreviewColors()
+	for part, originalColor in pairs(previewOriginalColors) do
+		if part and part.Parent then
+			part.Color = originalColor
+		end
+	end
+
+	if selectedPreviewPart and selectedPreviewPart.Parent then
+		if updateColorPickerForPart then
+			updateColorPickerForPart(selectedPreviewPart)
+		end
+	else
+		clearPreviewSelection()
+	end
+end
+
+local function placeColorPickerAtMouse()
+	if not colorPickerFrame then
+		return
+	end
+
+	local mousePosition = UserInputService:GetMouseLocation()
+	local currentCamera = Workspace.CurrentCamera or camera
+	local viewportSize = currentCamera and currentCamera.ViewportSize or Vector2.new(1920, 1080)
+	local frameSize = colorPickerFrame.AbsoluteSize
+	local margin = Vector2.new(16, 16)
+
+	local targetX = math.min(mousePosition.X - margin.X, viewportSize.X - margin.X)
+	local targetY = math.min(mousePosition.Y - margin.Y, viewportSize.Y - margin.Y)
+
+	if targetX - frameSize.X < margin.X then
+		targetX = frameSize.X + margin.X
+	end
+
+	if targetY - frameSize.Y < margin.Y then
+		targetY = frameSize.Y + margin.Y
+	end
+
+	colorPickerFrame.Position = UDim2.fromOffset(targetX, targetY)
+end
+
+local function ensureColorPicker(parent: GuiObject)
+	if colorPickerFrame then
+		colorPickerFrame.Parent = parent
+		return
+	end
+
+	colorPickerFrame = Instance.new("Frame")
+	colorPickerFrame.Name = "ColorPicker"
+	colorPickerFrame.Size = UDim2.new(0, 300, 0, 350)
+	colorPickerFrame.Position = UDim2.new(0, 40, 0.6, 0)
+	colorPickerFrame.BackgroundColor3 = Color3.fromRGB(35, 39, 52)
+	colorPickerFrame.BackgroundTransparency = 0.1
+	colorPickerFrame.BorderSizePixel = 0
+	colorPickerFrame.Visible = false
+	colorPickerFrame.Parent = parent
+	colorPickerFrame.ZIndex = 20
+	colorPickerFrame.AnchorPoint = Vector2.new(1, 1)
+
+	local padding = Instance.new("UIPadding")
+	padding.PaddingTop = UDim.new(0, 14)
+	padding.PaddingBottom = UDim.new(0, 14)
+	padding.PaddingLeft = UDim.new(0, 16)
+	padding.PaddingRight = UDim.new(0, 16)
+	padding.Parent = colorPickerFrame
+
+	local title = Instance.new("TextLabel")
+	title.Name = "Title"
+	title.Size = UDim2.new(1, 0, 0, 24)
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.GothamBold
+	title.Text = "Base Color"
+	title.TextColor3 = Color3.fromRGB(235, 237, 245)
+	title.TextSize = 20
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.ZIndex = colorPickerFrame.ZIndex + 1
+	title.Parent = colorPickerFrame
+
+	local partLabel = Instance.new("TextLabel")
+	partLabel.Name = "PartName"
+	partLabel.Size = UDim2.new(1, 0, 0, 18)
+	partLabel.Position = UDim2.new(0, 0, 0, 28)
+	partLabel.BackgroundTransparency = 1
+	partLabel.Font = Enum.Font.Gotham
+	partLabel.Text = ""
+	partLabel.TextColor3 = Color3.fromRGB(180, 186, 199)
+	partLabel.TextSize = 14
+	partLabel.TextXAlignment = Enum.TextXAlignment.Left
+	partLabel.ZIndex = colorPickerFrame.ZIndex + 1
+	partLabel.Parent = colorPickerFrame
+	colorPickerPartLabel = partLabel
+
+	local paletteContainer = Instance.new("ScrollingFrame")
+	paletteContainer.Name = "Palette"
+	paletteContainer.Size = UDim2.new(1, 0, 1, -120)
+	paletteContainer.Position = UDim2.new(0, 0, 0, 60)
+	paletteContainer.BackgroundTransparency = 1
+	paletteContainer.ZIndex = colorPickerFrame.ZIndex + 1
+	paletteContainer.Parent = colorPickerFrame
+	paletteContainer.ClipsDescendants = true
+	paletteContainer.CanvasSize = UDim2.new(0, 0, 0, 0)
+	paletteContainer.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	paletteContainer.ScrollBarThickness = 6
+	paletteContainer.ScrollingDirection = Enum.ScrollingDirection.Y
+	paletteContainer.ScrollBarImageTransparency = 0.3
+
+	local grid = Instance.new("UIGridLayout")
+	grid.CellSize = UDim2.new(0, 48, 0, 48)
+	grid.CellPadding = UDim2.new(0, 8, 0, 8)
+	grid.SortOrder = Enum.SortOrder.LayoutOrder
+	grid.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	grid.VerticalAlignment = Enum.VerticalAlignment.Top
+	grid.FillDirection = Enum.FillDirection.Horizontal
+	grid.FillDirectionMaxCells = 8
+	grid.Parent = paletteContainer
+
+	table.clear(colorPickerButtons)
+
+	for index, color in ipairs(COLOR_PALETTE) do
+		local button = Instance.new("TextButton")
+		button.Name = "Color" .. index
+		button.Size = UDim2.new(0, 48, 0, 48)
+		button.BackgroundColor3 = color
+		button.BorderSizePixel = 0
+		button.AutoButtonColor = false
+		button.Text = ""
+		button.ZIndex = paletteContainer.ZIndex + 1
+		button.Parent = paletteContainer
+
+		local stroke = Instance.new("UIStroke")
+		stroke.Name = "SelectionStroke"
+		stroke.Color = Color3.fromRGB(255, 255, 255)
+		stroke.Thickness = 2
+		stroke.Transparency = 0
+		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		stroke.Enabled = false
+		stroke.Parent = button
+
+		button.MouseButton1Click:Connect(function()
+			if not selectedPreviewPart then
+				return
+			end
+
+			selectedPreviewPart.Color = color
+			setActiveColorButton(button)
+		end)
+
+		colorPickerButtons[#colorPickerButtons + 1] = button
+	end
+
+	local resetButton = Instance.new("TextButton")
+	resetButton.Name = "ResetButton"
+	resetButton.Size = UDim2.new(1, 0, 0, 40)
+	resetButton.Position = UDim2.new(0, 0, 1, -44)
+	resetButton.BackgroundColor3 = Color3.fromRGB(60, 64, 82)
+	resetButton.BackgroundTransparency = 0.15
+	resetButton.BorderSizePixel = 0
+	resetButton.Font = Enum.Font.GothamMedium
+	resetButton.Text = "Reset Colors"
+	resetButton.TextColor3 = Color3.fromRGB(235, 237, 245)
+	resetButton.TextSize = 16
+	resetButton.ZIndex = colorPickerFrame.ZIndex + 1
+	resetButton.Parent = colorPickerFrame
+
+	resetButton.MouseButton1Click:Connect(function()
+		resetPreviewColors()
+	end)
+end
+
+local function getRelativePath(part: Instance, root: Instance): string?
+	local segments = {}
+	local current: Instance? = part
+	while current and current ~= root do
+		table.insert(segments, 1, current.Name)
+		current = current.Parent
+	end
+	if current ~= root then
+		return nil
+	end
+	return table.concat(segments, "/")
+end
+
+local function findPartByPath(root: Instance?, path: string): BasePart?
+	if not root or not path or path == "" then
+		return nil
+	end
+
+	local current: Instance? = root
+	for _, segment in ipairs(string.split(path, "/")) do
+		if not current or not current:IsA("Instance") then
+			return nil
+		end
+		current = current:FindFirstChild(segment)
+		if not current then
+			return nil
+		end
+	end
+
+	if current and current:IsA("BasePart") then
+		return current
+	end
+
+	return nil
+end
+
+local function collectColorScheme(model: Model?): {[string]: {r: number, g: number, b: number}}
+	local scheme = {}
+	if not model then
+		return scheme
+	end
+
+	local function addPart(part: BasePart)
+		if not isSelectablePart(part) then
+			return
+		end
+		local path = getRelativePath(part, model)
+		if not path then
+			return
+		end
+		scheme[path] = {
+			r = part.Color.R,
+			g = part.Color.G,
+			b = part.Color.B,
+		}
+	end
+
+	if model:IsA("BasePart") then
+		addPart(model)
+	end
+
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			addPart(descendant)
+		end
+	end
+
+	return scheme
+end
+
+local function toColor3(colorData: any): Color3?
+	if typeof(colorData) == "Color3" then
+		return colorData
+	elseif typeof(colorData) == "string" then
+		if colorData:sub(1, 1) == "#" and (#colorData == 7 or #colorData == 9) then
+			local hex = colorData:sub(2)
+			local value = tonumber(hex, 16)
+			if value then
+				local r = math.floor(value / 0x10000) % 0x100
+				local g = math.floor(value / 0x100) % 0x100
+				local b = value % 0x100
+				r = r / 255
+				g = g / 255
+				b = b / 255
+				return Color3.new(r, g, b)
+			end
+		end
+	elseif typeof(colorData) == "table" then
+		local r = colorData.r or colorData.R or colorData[1]
+		local g = colorData.g or colorData.G or colorData[2]
+		local b = colorData.b or colorData.B or colorData[3]
+		if typeof(r) == "number" and typeof(g) == "number" and typeof(b) == "number" then
+			return Color3.new(r, g, b)
+		end
+	end
+
+	return nil
+end
+
+local function applyColorSchemeToModel(model: Model?, colorScheme: any)
+	if not model or not colorScheme then
+		return
+	end
+
+	if typeof(colorScheme) ~= "table" then
+		return
+	end
+
+	if colorScheme[1] and typeof(colorScheme[1]) == "table" and colorScheme[1].path then
+		for _, entry in ipairs(colorScheme) do
+			local path = entry.path
+			local color = toColor3(entry.color)
+			if path and color then
+				local target = findPartByPath(model, path)
+				if target and isSelectablePart(target) then
+					target.Color = color
+				end
+			end
+		end
+	else
+		for path, colorData in pairs(colorScheme) do
+			if typeof(path) == "string" then
+				local color = toColor3(colorData)
+				if color then
+					local target = findPartByPath(model, path)
+					if target and isSelectablePart(target) then
+						target.Color = color
+					end
+				end
+			end
+		end
+	end
+end
+
+local function applyColorSchemeToWorkspaceModels(colorScheme: any)
+	if not colorScheme then
+		return
+	end
+
+	if typeof(colorScheme) == "table" then
+		local isArray = colorScheme[1] ~= nil
+		if not isArray and next(colorScheme) == nil then
+			return
+		elseif isArray and #colorScheme == 0 then
+			return
+		end
+	else
+		return
+	end
+
+	local rescueModel = Workspace:FindFirstChild(player.Name .. "_Rescue")
+	if rescueModel and rescueModel:IsA("Model") then
+		applyColorSchemeToModel(rescueModel, colorScheme)
+	end
+
+	local companionModel = Workspace:FindFirstChild(player.Name .. "_RescueCompanion")
+	if companionModel and companionModel:IsA("Model") then
+		applyColorSchemeToModel(companionModel, colorScheme)
+	end
+end
+
+local function loadColorSchemeIntoPreview()
+	local colorScheme = CustomizeService.getColorScheme()
+	if colorScheme then
+		currentColorScheme = colorScheme
+		if previewBot then
+			applyColorSchemeToModel(previewBot, colorScheme)
+		end
+		applyColorSchemeToWorkspaceModels(colorScheme)
+	else
+		currentColorScheme = nil
+	end
+end
+
+function updateColorPickerForPart(part: BasePart)
+	if not colorPickerFrame then
+		return
+	end
+
+	colorPickerFrame.Visible = true
+	if colorPickerPartLabel then
+		colorPickerPartLabel.Text = part.Name
+	end
+	placeColorPickerAtMouse()
+	task.defer(placeColorPickerAtMouse)
+
+	local currentColor = part.Color
+	local bestMatch: TextButton? = nil
+	local bestDistance = math.huge
+
+	for _, button in ipairs(colorPickerButtons) do
+		local buttonColor = button.BackgroundColor3
+		local distance = (Vector3.new(buttonColor.R, buttonColor.G, buttonColor.B) - Vector3.new(currentColor.R, currentColor.G, currentColor.B)).Magnitude
+		if distance < bestDistance then
+			bestDistance = distance
+			bestMatch = button
+		end
+	end
+
+	if bestMatch then
+		setActiveColorButton(bestMatch)
+	else
+		clearActiveColorButton()
+	end
+end
+
+local function selectPreviewPart(part: BasePart)
+	if not part then
+		clearPreviewSelection()
+		return
+	end
+
+	if not isSelectablePart(part) then
+		clearPreviewSelection()
+		return
+	end
+
+	selectedPreviewPart = part
+	if previewOriginalColors[part] == nil then
+		previewOriginalColors[part] = part.Color
+	end
+
+	local selection = ensureSelectionBox()
+	selection.Adornee = part
+	if previewBot then
+		selection.Parent = previewBot
+	else
+		selection.Parent = part
+	end
+
+	if updateColorPickerForPart then
+		updateColorPickerForPart(part)
+	end
+end
+
+local function pickPreviewPartFromMouse(): BasePart?
+	if not previewBot or not previewBot.Parent then
+		return nil
+	end
+
+	local mouseLocation = UserInputService:GetMouseLocation()
+	local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Include
+	raycastParams.FilterDescendantsInstances = {previewBot}
+	raycastParams.IgnoreWater = true
+
+	local result = Workspace:Raycast(ray.Origin, ray.Direction * 500, raycastParams)
+	if result and result.Instance and result.Instance:IsDescendantOf(previewBot) and result.Instance:IsA("BasePart") then
+		if not isSelectablePart(result.Instance) then
+			return nil
+		end
+		return result.Instance
+	end
+
+	return nil
+end
 
 local function isCellWithinAllowedArea(row: number, column: number): boolean
 	return row >= 1 and row <= 2 and column >= 1 and column <= 2
@@ -273,7 +811,19 @@ local function loadEquippedItems()
 		return
 	end
 
-	print("[CustomizeUI] Loading equipped items:", equippedItems)
+	print("[CustomizeUI] Loading equipped items:")
+	local entries = {}
+	for index, equippedItem in ipairs(equippedItems) do
+		local id = tostring(equippedItem.id)
+		local row = equippedItem.row or -1
+		local column = equippedItem.column or -1
+		entries[#entries + 1] = string.format("#%d=%s(r=%d,c=%d)", index, id, row, column)
+	end
+	if #entries > 0 then
+		print("  { " .. table.concat(entries, ", ") .. " }")
+	else
+		print("  { } (none)")
+	end
 
 	for _, equippedItem in ipairs(equippedItems) do
 		local itemId = equippedItem.id
@@ -1290,6 +1840,8 @@ local function createCustomizeUI()
 	loadoutLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	loadoutLayout.Parent = loadoutBar
 
+	ensureColorPicker(contentFrame)
+
 	rebuildLoadoutItems()
 
 	print("Customize UI created successfully")
@@ -1323,6 +1875,32 @@ local function setupPreviewBot()
 
 	-- Clone bot
 	previewBot = rescueModel:Clone()
+	clearPreviewSelection()
+
+	if previewDescendantConn then
+		previewDescendantConn:Disconnect()
+		previewDescendantConn = nil
+	end
+
+	table.clear(previewOriginalColors)
+
+	local function registerOriginalColor(instance: Instance)
+		if instance:IsA("BasePart") then
+			previewOriginalColors[instance] = instance.Color
+		end
+	end
+
+	if previewBot:IsA("BasePart") then
+		registerOriginalColor(previewBot)
+	end
+
+	for _, descendant in ipairs(previewBot:GetDescendants()) do
+		registerOriginalColor(descendant)
+	end
+
+	previewDescendantConn = previewBot.DescendantAdded:Connect(function(descendant)
+		registerOriginalColor(descendant)
+	end)
 
 	-- ตั้งค่า target bot สำหรับ EquipmentManager
 	EquipmentManager.setTargetBot(previewBot)
@@ -1411,6 +1989,12 @@ local function setupCameraRotation()
 		if gameProcessed then return end
 
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			local hitPart = pickPreviewPartFromMouse()
+			if hitPart then
+				selectPreviewPart(hitPart)
+			else
+				clearPreviewSelection()
+			end
 			isDragging = true
 			lastMousePosition = UserInputService:GetMouseLocation()
 		elseif input.KeyCode == Enum.KeyCode.Q then
@@ -1529,6 +2113,12 @@ end
 local function cleanupPreview()
 	-- Cleanup camera rotation controls
 	cleanupCameraRotation()
+	clearPreviewSelection()
+	if previewDescendantConn then
+		previewDescendantConn:Disconnect()
+		previewDescendantConn = nil
+	end
+	table.clear(previewOriginalColors)
 
 	-- Cleanup equipped items
 	EquipmentManager.clearAll()
@@ -1574,6 +2164,7 @@ function CustomizeUI.openCustomize()
 
 	-- Setup preview bot และ pan กล้อง
 	setupPreviewBot()
+	loadColorSchemeIntoPreview()
 	panCameraToGarage()
 
 	-- โหลด equipped items จาก profile และวางลง Slots
@@ -1609,6 +2200,22 @@ function CustomizeUI.closeCustomize()
 	-- บันทึกเสมอ แม้ว่าจะเป็น array ว่าง (unequip ทุกอย่าง)
 	CustomizeService.saveEquippedItems(equippedItemsWithPosition)
 	print("[CustomizeUI] Saved equipped items with positions:", equippedItemsWithPosition)
+
+	-- เก็บข้อมูลสีจาก preview แล้วส่งให้ server/โมเดลจริง
+	local colorScheme = collectColorScheme(previewBot)
+	currentColorScheme = colorScheme
+	CustomizeService.saveColorScheme(colorScheme)
+	applyColorSchemeToWorkspaceModels(colorScheme)
+
+	if colorScheme and next(colorScheme) then
+		local entries = {}
+		for path, color in pairs(colorScheme) do
+			entries[#entries + 1] = string.format("%s=(%.2f,%.2f,%.2f)", path, color.r, color.g, color.b)
+		end
+		print("[CustomizeUI] Saved color scheme (table):", entries)
+	else
+		print("[CustomizeUI] Color scheme empty (default colors in use)")
+	end
 
 	-- แสดง Player List กลับ
 	game:GetService("StarterGui"):SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, true)
