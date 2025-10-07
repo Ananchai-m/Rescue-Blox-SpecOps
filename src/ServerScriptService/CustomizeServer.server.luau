@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local CustomizeService = require(ReplicatedStorage.Modules.CustomizeService)
+local CompanionEquipment = require(ReplicatedStorage.Modules.CompanionEquipment)
 
 -- ใช้ Shared ProfileService instance
 local profileService = require(ServerScriptService.SharedProfileService)
@@ -21,7 +22,10 @@ CustomizeService.onSaveEquipment(function(player: Player, equippedItems: {{id: s
 	end
 
 	-- บันทึก equipped items พร้อมตำแหน่ง
+	profile.bot = profile.bot or {}
+	profile.bot.inventory = profile.bot.inventory or {}
 	profile.bot.inventory.equipped = equippedItems
+	CompanionEquipment.applyForPlayer(player, equippedItems)
 
 	-- Save profile
 	local saveSuccess = profileService:SaveProfile(player)

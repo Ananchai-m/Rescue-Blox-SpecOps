@@ -944,15 +944,6 @@ connections.inputBegan = UserInputService.InputBegan:Connect(function(input, gam
 					end
 				end
 
-				-- เช็ค Head.HingeConstraint.Enabled (ต้อง Enabled ด้วย)
-				local head = drillArm:FindFirstChild("Head")
-				if head then
-					local headHingeConstraint = head:FindFirstChild("HingeConstraint")
-					if headHingeConstraint and not headHingeConstraint.Enabled then
-						canDrill = false
-						print("[Click Debug] Head.HingeConstraint is disabled")
-					end
-				end
 			end
 		end
 

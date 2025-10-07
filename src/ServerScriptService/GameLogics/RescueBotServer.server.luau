@@ -6,6 +6,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 -- Import shared config
 local DrillConfig = require(ReplicatedStorage.Modules.DrillConfig)
 local EquipmentManager = require(ReplicatedStorage.Modules.EquipmentManager)
+local CompanionEquipment = require(ReplicatedStorage.Modules.CompanionEquipment)
 local profileService = require(ServerScriptService.SharedProfileService)
 
 -- สร้าง RemoteEvents สำหรับสื่อสารกับ client
@@ -92,6 +93,64 @@ local rescueBotHealthInstances = {} -- เก็บ RescueBotHealth instances
 -- Server-side Waiting System variables
 local waitingPlayers = {}
 local isGamePlaying = false
+
+local function foldDrillArm(model: Model?, playerName: string, context: string)
+	if not model then
+		return
+	end
+
+	task.spawn(function()
+		task.wait(0.5)
+
+		local drillArm = model:FindFirstChild("DrillArm")
+		if not drillArm then
+			warn(string.format("[RescueBotServer][%s] DrillArm not found for %s", context, playerName))
+			return
+		end
+
+		local hingeConstraint: HingeConstraint? = nil
+		local tube2 = drillArm:FindFirstChild("Tube2")
+		if tube2 then
+			hingeConstraint = tube2:FindFirstChildWhichIsA("HingeConstraint")
+		end
+
+		if not hingeConstraint then
+			hingeConstraint = drillArm:FindFirstChildWhichIsA("HingeConstraint", true)
+		end
+
+		if not hingeConstraint then
+			warn(string.format("[RescueBotServer][%s] HingeConstraint not found in DrillArm for %s", context, playerName))
+			return
+		end
+
+		hingeConstraint.LimitsEnabled = true
+		hingeConstraint.ActuatorType = Enum.ActuatorType.Servo
+		hingeConstraint.ServoMaxTorque = 1000000
+		hingeConstraint.AngularResponsiveness = 50
+		hingeConstraint.AngularSpeed = 1
+		hingeConstraint.TargetAngle = 180
+	end)
+end
+
+local function getBasePart(instance: Instance?): BasePart?
+	if not instance then
+		return nil
+	end
+
+	if instance:IsA("BasePart") then
+		return instance
+	end
+
+	if instance:IsA("Model") then
+		local model = instance :: Model
+		if model.PrimaryPart then
+			return model.PrimaryPart
+		end
+		return model:FindFirstChildWhichIsA("BasePart", true)
+	end
+
+	return instance:FindFirstChildWhichIsA("BasePart", true)
+end
 
 local function handleRescueBotTimeout(player)
 	if not player then
@@ -372,6 +431,11 @@ spawnCompanionEvent.OnServerEvent:Connect(function(player, position, orientation
 
 	-- ใช้ PivotTo เพื่อตั้งตำแหน่งหลังจากใส่ใน workspace แล้ว
 	companion:PivotTo(CFrame.new(spawnPosition, spawnPosition + spawnLook))
+
+	local profile = profileService:GetProfile(player)
+	local equippedItems = profile and profile.bot and profile.bot.inventory and profile.bot.inventory.equipped or {}
+	CompanionEquipment.apply(companion, equippedItems)
+	foldDrillArm(companion, player.Name, "Companion")
 
 	local follower = CompanionFollower.start(companion)
 	companionFollowers[player] = follower
@@ -668,7 +732,10 @@ local function applyDrillSpin(player, state)
 			state.head = head
 			state.originalMassless = head.Massless
 			state.originalPhysicalProperties = head.CustomPhysicalProperties
+			state.originalAnchored = head.Anchored
 		end
+		-- Unanchor Head เพื่อให้ HingeConstraint หมุนได้
+		head.Anchored = false
 		head.Massless = true
 		pcall(function()
 			head.CustomPhysicalProperties = PhysicalProperties.new(0.1, 0.3, 0.3)
@@ -741,6 +808,7 @@ local function applyDrillSpin(player, state)
 	local torque = BASE_TORQUE + (state.combo - 1) * TORQUE_STEP
 	pcall(function()
 		hinge.AngularSpeed = speed
+		hinge.AngularVelocity = 100
 		hinge.MotorMaxTorque = torque
 		hinge.AngularResponsiveness = 80
 	end)
@@ -782,6 +850,10 @@ local function stopDrillSpin(state)
 	state.anchorInfo = nil
 	if state.head and state.head:IsA("BasePart") then
 		local head = state.head
+		-- คืนค่า Anchored เดิม
+		if state.originalAnchored ~= nil then
+			head.Anchored = state.originalAnchored
+		end
 		head.Massless = state.originalMassless or false
 		pcall(function()
 			head.CustomPhysicalProperties = state.originalPhysicalProperties
@@ -790,6 +862,7 @@ local function stopDrillSpin(state)
 	state.head = nil
 	state.originalMassless = nil
 	state.originalPhysicalProperties = nil
+	state.originalAnchored = nil
 
 	if state.wheelConstraints then
 		for constraint, info in pairs(state.wheelConstraints) do
@@ -848,6 +921,31 @@ hydraulicRemote.OnServerEvent:Connect(function(player)
 	if not hinge then
 		warn("Drill arm not found for", player.Name)
 		return
+	end
+
+	-- Disable Motor6D และ Enable HingeConstraint เพื่อให้หมุนได้
+	local drillArm = rescueModel:FindFirstChild("DrillArm")
+	if drillArm then
+		-- Disable Motor6D และ Enable HingeConstraint ใน Head
+		local head = drillArm:FindFirstChild("Head")
+		local headPart = getBasePart(head)
+		if headPart then
+			for _, child in ipairs(headPart:GetChildren()) do
+				if child:IsA("Motor6D") then
+					child.Enabled = false
+					print("[Server] Disabled Head Motor6D:", child.Name, "for", player.Name)
+				end
+			end
+		end
+
+		-- Enable HingeConstraint เพื่อให้หมุนได้
+		if head then
+			local headHingeConstraint = head:FindFirstChild("HingeConstraint")
+			if headHingeConstraint then
+				headHingeConstraint.Enabled = true
+				print("[Server] Enabled Head HingeConstraint for drilling:", player.Name)
+			end
+		end
 	end
 
 	local state = playerDrillStates[player]
@@ -986,46 +1084,7 @@ spawnOriginalRescueEvent.OnServerEvent:Connect(function(player, position)
 		end
 	end)
 
-	-- พับเก็บ DrillArm หลัง spawn เสร็จ (TargetAngle = 180)
-	task.spawn(function()
-		task.wait(0.5) -- เพิ่ม delay ให้ physics โหลดเสร็จ
-
-		local drillArm = originalRescueModel:FindFirstChild("DrillArm")
-		if drillArm then
-			print("[RescueBotServer] Found DrillArm for", player.Name)
-			local tube2 = drillArm:FindFirstChild("Tube2")
-			if tube2 then
-				print("[RescueBotServer] Found Tube2, children:", tube2:GetChildren())
-				local hingeConstraint = tube2:FindFirstChild("HingeConstraint")
-				if hingeConstraint then
-					print("[RescueBotServer] Found HingeConstraint - ActuatorType:", hingeConstraint.ActuatorType, "TargetAngle:", hingeConstraint.TargetAngle)
-					print("[RescueBotServer] CurrentAngle:", hingeConstraint.CurrentAngle, "LimitsEnabled:", hingeConstraint.LimitsEnabled)
-					if hingeConstraint.LimitsEnabled then
-						print("[RescueBotServer] LowerAngle:", hingeConstraint.LowerAngle, "UpperAngle:", hingeConstraint.UpperAngle)
-					end
-
-					-- ปิด Limits เพื่อให้พับได้เต็มที่
-					hingeConstraint.LimitsEnabled = true
-
-					-- ตั้งค่าให้ HingeConstraint ทำงานเป็น Servo
-					hingeConstraint.ActuatorType = Enum.ActuatorType.Servo
-					hingeConstraint.ServoMaxTorque = 1000000
-					hingeConstraint.AngularResponsiveness = 50
-					hingeConstraint.AngularSpeed = 1
-					hingeConstraint.TargetAngle = 180
-
-					task.wait(0.5)
-					print("[RescueBotServer] DrillArm folded - CurrentAngle:", hingeConstraint.CurrentAngle, "TargetAngle:", hingeConstraint.TargetAngle)
-				else
-					warn("[RescueBotServer] HingeConstraint not found in Tube2")
-				end
-			else
-				warn("[RescueBotServer] Tube2 not found, DrillArm children:", drillArm:GetChildren())
-			end
-		else
-			warn("[RescueBotServer] DrillArm not found, Model children:", originalRescueModel:GetChildren())
-		end
-	end)
+	foldDrillArm(originalRescueModel, player.Name, "OriginalRescue")
 
 	print("Server: Spawned original rescue model for", player.Name)
 end)
@@ -1099,8 +1158,12 @@ toggleDrillModeRemote.OnServerEvent:Connect(function(player, isActive)
 	local rescueModel = workspace:FindFirstChild(rescueModelName)
 
 	if not rescueModel then
-		warn("Rescue model not found for", player.Name)
-		return
+		rescueModelName = player.Name .. "_RescueCompanion"
+		rescueModel = workspace:FindFirstChild(rescueModelName)
+		if not rescueModel then
+			warn("Rescue model not found for", player.Name)
+			return
+		end
 	end
 
 	local drillArm = rescueModel:FindFirstChild("DrillArm")
@@ -1109,39 +1172,58 @@ toggleDrillModeRemote.OnServerEvent:Connect(function(player, isActive)
 		return
 	end
 
-	-- ควบคุม Tube2.HingeConstraint
 	local tube2 = drillArm:FindFirstChild("Tube2")
-	if tube2 then
-		local hingeConstraint = tube2:FindFirstChild("HingeConstraint")
-		if hingeConstraint then
-			if isActive then
-				-- เปิดโหมดเจาะ: TargetAngle = 0
-				hingeConstraint.TargetAngle = 0
-				print("[Server] Drill mode activated for", player.Name, "- TargetAngle = 0")
-			else
-				-- ปิดโหมดเจาะ: TargetAngle = -180
-				hingeConstraint.TargetAngle = -180
-				print("[Server] Drill mode deactivated for", player.Name, "- TargetAngle = -180")
-			end
-		end
-	end
-
-	-- ควบคุม Head.HingeConstraint
+	local tube2Part = getBasePart(tube2)
 	local head = drillArm:FindFirstChild("Head")
-	if head then
-		local headHingeConstraint = head:FindFirstChild("HingeConstraint")
-		if headHingeConstraint then
-			if isActive then
-				-- เปิดโหมดเจาะ: เปิดให้ HingeConstraint ทำงาน
-				headHingeConstraint.Enabled = true
-				print("[Server] Head HingeConstraint enabled for", player.Name)
-			else
-				-- ปิดโหมดเจาะ: หยุดการหมุนและ Disable
-				headHingeConstraint.AngularVelocity = 0
-				headHingeConstraint.MotorMaxTorque = 0
-				headHingeConstraint.Enabled = false
-				print("[Server] Head HingeConstraint disabled for", player.Name)
+	local headPart = getBasePart(head)
+
+	local weldName = "HeadTube2Weld"
+	local motorName = "HeadTube2Motor6D"
+
+	if headPart and tube2Part then
+		if isActive then
+			-- ควบคุม Tube2.HingeConstraint
+			if tube2 then
+				local hingeConstraint = tube2:FindFirstChild("HingeConstraint")
+				if hingeConstraint then
+					-- เปิดโหมดเจาะ: TargetAngle = 0
+					hingeConstraint.TargetAngle = 0
+					print("[Server] Drill mode activated for", player.Name, "- TargetAngle = 0")
+				end
 			end
+		else
+			if headPart then
+				for _, child in ipairs(headPart:GetChildren()) do
+					if child:IsA("Motor6D") then
+						child.Enabled = true
+						print("[Server] Re-enabled Head Motor6D:", child.Name, "for", player.Name)
+					end
+				end
+			end
+			-- พับเก็บ: หยุด Motor และ Disable HingeConstraint ก่อน
+			if head then
+				local headHingeConstraint = head:FindFirstChild("HingeConstraint")
+				if headHingeConstraint then
+					-- หยุดการหมุนและ Disable ทันที
+					headHingeConstraint.AngularVelocity = 0
+					headHingeConstraint.MotorMaxTorque = 0
+					headHingeConstraint.Enabled = false
+					print("[Server] Stopped and Disabled Head Motor for fold-up", player.Name)
+				end
+			end
+
+			-- รอให้หยุดสนิท
+			task.wait(0.1)
+
+			-- ปิดโหมดเจาะ: TargetAngle = 180 (พับเก็บ)
+			if tube2 then
+				local hingeConstraint = tube2:FindFirstChild("HingeConstraint")
+				if hingeConstraint then
+					hingeConstraint.TargetAngle = 180
+					print("[Server] Drill mode deactivated for", player.Name, "- TargetAngle = 180")
+				end
+			end
+			print("[Server] Removed Head-Tube2 Motor6D for", player.Name)
 		end
 	end
 end)

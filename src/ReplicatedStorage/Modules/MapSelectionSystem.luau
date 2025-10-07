@@ -312,8 +312,15 @@ function MapSelectionSystem.startVoting(players)
 	if ShopUI.closeShop then
 		ShopUI.closeShop()
 	end
+	if ShopUI.setButtonVisible then
+		ShopUI.setButtonVisible(false)
+	end
+
 	if CustomizeUI.closeCustomize then
 		CustomizeUI.closeCustomize()
+	end
+	if CustomizeUI.setButtonVisible then
+		CustomizeUI.setButtonVisible(false)
 	end
 
 	print("Starting map voting with " .. #players .. " players")
@@ -467,6 +474,14 @@ function MapSelectionSystem.startVoting(players)
 					playerGui:Destroy()
 				end
 			end
+		end
+
+		-- แสดง Shop และ Customize icons กลับมา
+		if ShopUI.setButtonVisible then
+			ShopUI.setButtonVisible(true)
+		end
+		if CustomizeUI.setButtonVisible then
+			CustomizeUI.setButtonVisible(true)
 		end
 
 		isVoting = false
