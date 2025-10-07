@@ -3,6 +3,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local GameConfig = require(ReplicatedStorage.Modules.GameConfig)
 
+-- Import UI modules
+local ShopUI = require(ReplicatedStorage.Modules.ShopUI)
+local CustomizeUI = require(ReplicatedStorage.Modules.CustomizeUI)
+
 local MapSelectionSystem = {}
 
 -- รอ RemoteEvents
@@ -303,6 +307,14 @@ function MapSelectionSystem.startVoting(players)
 
 	-- รีเซ็ต votes บน server
 	mapVotingRemote:FireServer("resetVotes")
+
+	-- ซ่อน Shop และ Customize icons
+	if ShopUI.closeShop then
+		ShopUI.closeShop()
+	end
+	if CustomizeUI.closeCustomize then
+		CustomizeUI.closeCustomize()
+	end
 
 	print("Starting map voting with " .. #players .. " players")
 

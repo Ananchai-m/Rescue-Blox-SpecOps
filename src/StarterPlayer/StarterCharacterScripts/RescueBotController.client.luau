@@ -17,6 +17,7 @@ local CameraSystem = require(ReplicatedStorage.Modules.CameraSystem)
 local VehicleController = require(ReplicatedStorage.Modules.VehicleController)
 local GameConfig = require(ReplicatedStorage.Modules.GameConfig)
 local ShopUI = require(ReplicatedStorage.Modules.ShopUI)
+local CustomizeUI = require(ReplicatedStorage.Modules.CustomizeUI)
 local CustomizeService = require(ReplicatedStorage.Modules.CustomizeService)
 
 -- รอ RemoteEvents
@@ -1116,6 +1117,8 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 			print("Starting map selection...")
 			ShopUI.closeShop()
 			ShopUI.setButtonVisible(false)
+			CustomizeUI.closeCustomize()
+			CustomizeUI.setButtonVisible(false)
 
 			local function cleanupVotingCallback()
 				if unregisterVotingComplete then
@@ -1151,6 +1154,7 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 			unregisterVotingComplete = nil
 		end
 		ShopUI.setButtonVisible(true)
+		CustomizeUI.setButtonVisible(true)
 
 		-- ล้างสถานะเกมทั้งหมด
 		playerInGame = false
@@ -1218,6 +1222,7 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 			unregisterVotingComplete = nil
 		end
 		ShopUI.setButtonVisible(true)
+		CustomizeUI.setButtonVisible(true)
 	end
 end)
 
