@@ -23,6 +23,14 @@ local canDrill = true
 local rescueRemotes = ReplicatedStorage:WaitForChild("RescueBotRemotes")
 local botDeathRemote = rescueRemotes:WaitForChild("BotDeath")
 
+-- Create or get drill effect remote
+local drillEffectRemote = rescueRemotes:FindFirstChild("DrillEffect")
+if not drillEffectRemote then
+	drillEffectRemote = Instance.new("RemoteEvent")
+	drillEffectRemote.Name = "DrillEffect"
+	drillEffectRemote.Parent = rescueRemotes
+end
+
 -- UI Variables
 local drillGui = nil
 local drillContainer = nil
@@ -736,6 +744,9 @@ function DrillSystem.handleDrillingClick(clickPosition)
 	-- เปิด Particle Effects เมื่อคลิก
 	enableDrillEffects()
 
+	-- ส่งสัญญาณไปยัง server เพื่อ broadcast ให้เพื่อนเห็น effect
+	drillEffectRemote:FireServer("start")
+
 	-- ยกเลิก timer เก่าถ้ามี
 	if drillEffectStopTimer then
 		task.cancel(drillEffectStopTimer)
@@ -744,6 +755,7 @@ function DrillSystem.handleDrillingClick(clickPosition)
 	-- ตั้ง timer ใหม่เพื่อปิด effects หลังหยุดคลิก 0.5 วินาที
 	drillEffectStopTimer = task.delay(0.5, function()
 		disableDrillEffects()
+		drillEffectRemote:FireServer("stop")
 		drillEffectStopTimer = nil
 	end)
 
@@ -846,6 +858,71 @@ drillCompleteRemote.OnClientEvent:Connect(function(position, coinAmount)
 	-- Show coin effect when drilling is complete
 	if position and coinAmount then
 		CoinEffect.SpawnCoins(position, coinAmount, player)
+	end
+end)
+
+-- Listen for drill effect events from other players
+drillEffectRemote.OnClientEvent:Connect(function(otherPlayer, action)
+	-- Don't apply effects to self (already handled locally)
+	if otherPlayer == player then
+		return
+	end
+
+	-- Find the other player's rescue bot
+	local rescueBotName = otherPlayer.Name .. "_Rescue"
+	local rescueBot = workspace:FindFirstChild(rescueBotName)
+	if not rescueBot then
+		return
+	end
+
+	local drillArm = rescueBot:FindFirstChild("DrillArm")
+	if not drillArm then
+		return
+	end
+
+	local head = drillArm:FindFirstChild("Head")
+	if not head then
+		return
+	end
+
+	if action == "start" then
+		-- Enable effects
+		local attachment1 = head:FindFirstChild("AttachmentEffect1")
+		if attachment1 then
+			for _, effect in ipairs(attachment1:GetChildren()) do
+				if effect:IsA("ParticleEmitter") then
+					effect.Enabled = true
+				end
+			end
+		end
+
+		local attachment2 = head:FindFirstChild("AttachmentEffect2")
+		if attachment2 then
+			for _, effect in ipairs(attachment2:GetChildren()) do
+				if effect:IsA("ParticleEmitter") then
+					effect.Enabled = true
+				end
+			end
+		end
+	elseif action == "stop" then
+		-- Disable effects
+		local attachment1 = head:FindFirstChild("AttachmentEffect1")
+		if attachment1 then
+			for _, effect in ipairs(attachment1:GetChildren()) do
+				if effect:IsA("ParticleEmitter") then
+					effect.Enabled = false
+				end
+			end
+		end
+
+		local attachment2 = head:FindFirstChild("AttachmentEffect2")
+		if attachment2 then
+			for _, effect in ipairs(attachment2:GetChildren()) do
+				if effect:IsA("ParticleEmitter") then
+					effect.Enabled = false
+				end
+			end
+		end
 	end
 end)
 

@@ -50,6 +50,7 @@ local toggleDrillModeRemote = getOrCreateRemote("ToggleDrillMode")
 local updateHPRemote = getOrCreateRemote("UpdateHP")
 local updateBatteryRemote = getOrCreateRemote("UpdateBattery")
 local debugModifyHPRemote = getOrCreateRemote("DebugModifyHP")
+local drillEffectRemote = getOrCreateRemote("DrillEffect")
 local CompanionFollower = require(script.Parent:WaitForChild("CompanionFollower"))
 
 -- Import VictimSpawner, GameConfig, GameSummary, and RescueBotHealth
@@ -1836,5 +1837,15 @@ if templateReady and spawnPointsReady then
 else
 	warn("VictimSpawner setup incomplete - victims may not spawn properly")
 end
+
+-- Handle drill effect broadcasting
+drillEffectRemote.OnServerEvent:Connect(function(player, action)
+	-- Broadcast to all other players
+	for _, otherPlayer in ipairs(Players:GetPlayers()) do
+		if otherPlayer ~= player then
+			drillEffectRemote:FireClient(otherPlayer, player, action)
+		end
+	end
+end)
 
 print("RescueBotServer loaded")
