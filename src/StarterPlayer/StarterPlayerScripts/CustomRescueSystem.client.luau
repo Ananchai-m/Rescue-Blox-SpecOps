@@ -128,10 +128,10 @@ local function findNearestVictim()
 	local character = player.Character
 	local searchPosition = nil
 
-	-- Try to find player's vehicle first
+	-- Find player's rescue bot (_Rescue only)
 	local playerVehicle = nil
 	for _, model in ipairs(workspace:GetChildren()) do
-		if model:IsA("Model") and (model.Name == player.Name .. "_RescueCompanion" or model.Name == player.Name .. "_Rescue") then
+		if model:IsA("Model") and model.Name == player.Name .. "_Rescue" then
 			if model.PrimaryPart then
 				playerVehicle = model
 				searchPosition = model.PrimaryPart.Position
@@ -165,22 +165,30 @@ local function findNearestVictim()
 	end
 
 	local victimCount = 0
+	local closestDistance = math.huge
 	for _, victim in ipairs(victimFolder:GetChildren()) do
 		if victim.Name:match("^Victim_") then
 			victimCount = victimCount + 1
 			local rootPart = victim:FindFirstChild("HumanoidRootPart")
 			if rootPart then
 				local distance = (rootPart.Position - searchPosition).Magnitude
+				if distance < closestDistance then
+					closestDistance = distance
+				end
 				if distance <= RESCUE_DISTANCE and distance < nearestDistance then
 					nearest = victim
 					nearestDistance = distance
 				end
+			else
+				print("[CustomRescueSystem] Victim", victim.Name, "has no HumanoidRootPart")
 			end
 		end
 	end
 
 	if victimCount == 0 then
 		print("[CustomRescueSystem] No victims found in VictimFolders")
+	elseif tick() - lastDebugTime > 5 then
+		print("[CustomRescueSystem] Found", victimCount, "victims, closest is", math.floor(closestDistance), "studs away")
 	end
 
 	return nearest, nearestDistance
@@ -454,11 +462,19 @@ end
 -- Wait for victims to be ready before initializing
 local function waitForVictimsAndInitialize()
 	if player.Character then
-		print("[CustomRescueSystem] Waiting for victims to be spawned...")
-		victimsReadyRemote.OnClientEvent:Wait()
-		print("[CustomRescueSystem] Victims ready signal received")
-		task.wait(1) -- Additional wait for character to be ready
-		initializeSystem()
+		-- Check if VictimFolders already exists
+		local victimFolder = workspace:FindFirstChild("VictimFolders")
+		if victimFolder and #victimFolder:GetChildren() > 0 then
+			print("[CustomRescueSystem] VictimFolders already exists, initializing immediately")
+			task.wait(1)
+			initializeSystem()
+		else
+			print("[CustomRescueSystem] Waiting for victims to be spawned...")
+			victimsReadyRemote.OnClientEvent:Wait()
+			print("[CustomRescueSystem] Victims ready signal received")
+			task.wait(1) -- Additional wait for character to be ready
+			initializeSystem()
+		end
 	end
 end
 
@@ -487,7 +503,7 @@ end)
 -- Listen for victims ready signal to initialize system
 victimsReadyRemote.OnClientEvent:Connect(function()
 	print("[CustomRescueSystem] Victims ready signal received")
-	if player.Character then
+	if player.Character and not systemInitialized then
 		task.wait(1) -- Wait for character to be ready
 		initializeSystem()
 	end

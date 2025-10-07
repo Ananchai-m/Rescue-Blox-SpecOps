@@ -107,12 +107,12 @@ rescueRemote.OnServerEvent:Connect(function(player, action, victim)
 		-- Check distance (server-side validation)
 		local playerPosition = nil
 
-		-- Try to find player's vehicle first (same logic as client)
+		-- Find player's rescue bot (_Rescue only, same logic as client)
 		for _, model in ipairs(workspace:GetChildren()) do
-			if model:IsA("Model") and (model.Name == player.Name .. "_RescueCompanion" or model.Name == player.Name .. "_Rescue") then
+			if model:IsA("Model") and model.Name == player.Name .. "_Rescue" then
 				if model.PrimaryPart then
 					playerPosition = model.PrimaryPart.Position
-					print("[VictimRescueSystem] Using vehicle position for", player.Name, ":", model.Name)
+					print("[VictimRescueSystem] Using rescue bot position for", player.Name, ":", model.Name)
 					break
 				end
 			end

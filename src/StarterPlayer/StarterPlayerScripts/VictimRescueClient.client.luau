@@ -172,6 +172,7 @@ rescueRemote.OnClientEvent:Connect(function(action, data, position)
 		local coinAmount = data or 1
 		local worldPosition = position or Vector3.new(0, 10, 0)
 
+		print("[VictimRescueClient] Received coinCollected:", coinAmount, "coins at", worldPosition)
 		CoinEffect.SpawnCoins(worldPosition, coinAmount, player)
 		playRescueSound()
 	elseif action == "victimRescued" then
