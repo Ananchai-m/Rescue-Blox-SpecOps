@@ -1,9 +1,12 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 -- Import shared config
 local DrillConfig = require(ReplicatedStorage.Modules.DrillConfig)
+local EquipmentManager = require(ReplicatedStorage.Modules.EquipmentManager)
+local profileService = require(ServerScriptService.SharedProfileService)
 
 -- สร้าง RemoteEvents สำหรับสื่อสารกับ client
 local remoteEventsFolder = ReplicatedStorage:FindFirstChild("RescueBotRemotes")
@@ -955,6 +958,33 @@ spawnOriginalRescueEvent.OnServerEvent:Connect(function(player, position)
 	})
 	rescueBotHealthInstances[player] = healthInstance
 	print("[RescueBotServer] Created RescueBotHealth for", player.Name)
+
+	-- โหลด equipped items จาก profile
+	task.spawn(function()
+		local profile = profileService:GetProfile(player)
+		if profile and profile.bot and profile.bot.inventory then
+			local equippedItems = profile.bot.inventory.equipped
+			if equippedItems and #equippedItems > 0 then
+				-- ตั้งค่า target bot สำหรับ EquipmentManager
+				EquipmentManager.setTargetBot(originalRescueModel)
+
+				-- Equip items ทั้งหมดที่อยู่ใน profile
+				for _, equippedItem in ipairs(equippedItems) do
+					local itemId = equippedItem.id
+					local success = EquipmentManager.equipItem(itemId)
+					if success then
+						print("[RescueBotServer] Equipped", itemId, "for", player.Name)
+					else
+						warn("[RescueBotServer] Failed to equip", itemId, "for", player.Name)
+					end
+				end
+			else
+				print("[RescueBotServer] No equipped items found for", player.Name)
+			end
+		else
+			warn("[RescueBotServer] Profile not found for", player.Name)
+		end
+	end)
 
 	-- พับเก็บ DrillArm หลัง spawn เสร็จ (TargetAngle = 180)
 	task.spawn(function()

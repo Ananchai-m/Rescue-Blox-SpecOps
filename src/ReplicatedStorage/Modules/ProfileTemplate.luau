@@ -16,6 +16,12 @@ export type InventoryItem = {
 	uses: number?
 }
 
+export type EquippedItem = {
+	id: string,
+	row: number,
+	column: number
+}
+
 export type PlayerProfile = {
 	meta: {
 		version: number,
@@ -46,7 +52,7 @@ export type PlayerProfile = {
 		slotsUnlocked: number,
 		inventory: {
 			owned: { [string]: InventoryItem },
-			equipped: { string }
+			equipped: { EquippedItem }
 		}
 	},
 	monetization: {
@@ -98,7 +104,27 @@ function ProfileTemplate.new(player: Player): PlayerProfile
 			},
 			slotsUnlocked = 4,
 			inventory = {
-				owned = {},
+				owned = {
+					-- Starter items
+					SolarCell = {
+						id = "SolarCell",
+						slotCost = 2,
+						tier = 1,
+						uses = nil
+					},
+					ThermometerCamera = {
+						id = "ThermometerCamera",
+						slotCost = 1,
+						tier = 1,
+						uses = nil
+					},
+					Zoom3x5xCamera = {
+						id = "Zoom3x5xCamera",
+						slotCost = 1,
+						tier = 1,
+						uses = nil
+					}
+				},
 				equipped = {}
 			}
 		},

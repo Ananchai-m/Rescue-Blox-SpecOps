@@ -7,8 +7,10 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
 
--- Import TopbarPlus
+-- Import modules
 local TopbarPlus = require(ReplicatedStorage.Packages.TopbarPlus)
+local EquipmentManager = require(ReplicatedStorage.Modules.EquipmentManager)
+local CustomizeService = require(ReplicatedStorage.Modules.CustomizeService)
 
 local CustomizeUI = {}
 
@@ -111,6 +113,8 @@ local loadoutBarFrame: Frame? = nil
 local createLoadoutSlot: ((LoadoutConfig, number) -> Frame)?
 local rebuildLoadoutItems: (() -> ())?
 local beginSlotItemDrag: ((Frame) -> ())?
+local setGuiTreeZIndex: ((GuiObject, number) -> ())? = nil
+local updateSlotLabels: (() -> ())? = nil
 
 local function isCellWithinAllowedArea(row: number, column: number): boolean
 	return row >= 1 and row <= 2 and column >= 1 and column <= 2
@@ -260,7 +264,153 @@ local function clearInventoryPlacements()
 	end
 end
 
-local function setGuiTreeZIndex(guiObject: GuiObject, baseZIndex: number)
+-- โหลด equipped items จาก profile และวางลง Slots
+local function loadEquippedItems()
+	-- ดึง equipped items จาก server
+	local equippedItems = CustomizeService.getEquippedItems()
+	if not equippedItems or #equippedItems == 0 then
+		print("[CustomizeUI] No equipped items to load")
+		return
+	end
+
+	print("[CustomizeUI] Loading equipped items:", equippedItems)
+
+	for _, equippedItem in ipairs(equippedItems) do
+		local itemId = equippedItem.id
+		local row = equippedItem.row
+		local column = equippedItem.column
+		-- หา config สำหรับ item นี้
+		local config: LoadoutConfig? = nil
+		for _, c in ipairs(loadoutConfigs) do
+			if c.id == itemId then
+				config = c
+				break
+			end
+		end
+
+		if not config then
+			warn("[CustomizeUI] Config not found for item:", itemId)
+			continue
+		end
+
+		-- ตรวจสอบว่าตำแหน่งที่บันทึกไว้ว่างและพอดีกับ item หรือไม่
+		local canPlace = true
+		for r = row, row + config.size.Y - 1 do
+			for c = column, column + config.size.X - 1 do
+				if slotOccupancy[r] and slotOccupancy[r][c] then
+					canPlace = false
+					break
+				end
+				if not isCellWithinAllowedArea(r, c) then
+					canPlace = false
+					break
+				end
+			end
+			if not canPlace then break end
+		end
+
+		if canPlace then
+				-- สร้าง item frame และวางลง slot (เหมือนกับตอนลากวาง)
+				local itemFrame = Instance.new("Frame")
+				itemFrame.Name = "PlacedItem_" .. itemId
+				itemFrame.BackgroundColor3 = Color3.fromRGB(58, 62, 77)
+				itemFrame.BackgroundTransparency = 0.08
+				itemFrame.BorderSizePixel = 0
+				itemFrame.Active = false
+				itemFrame.Selectable = false
+
+				-- เพิ่ม label
+				local label = Instance.new("TextLabel")
+				label.Name = "Label"
+				label.Size = UDim2.new(1, -8, 1, -8)
+				label.Position = UDim2.new(0.5, 0, 0.5, 0)
+				label.AnchorPoint = Vector2.new(0.5, 0.5)
+				label.BackgroundTransparency = 1
+				label.Font = Enum.Font.GothamMedium
+				label.Text = config.displayName
+				label.TextColor3 = Color3.fromRGB(220, 224, 233)
+				label.TextScaled = true
+				label.TextWrapped = true
+				label.Parent = itemFrame
+
+				-- คำนวณตำแหน่งและขนาด
+				local topSlot = slotMap[row] and slotMap[row][column]
+				if not topSlot then
+					warn("[CustomizeUI] Slot not found for position:", row, column)
+					itemFrame:Destroy()
+					break
+				end
+
+				local endRow = row + config.size.Y - 1
+				local endColumn = column + config.size.X - 1
+				local bottomSlot = slotMap[endRow] and slotMap[endRow][endColumn]
+				if not bottomSlot then
+					warn("[CustomizeUI] Bottom slot not found for position:", endRow, endColumn)
+					itemFrame:Destroy()
+					break
+				end
+
+				local topSlotFrame = topSlot.frame
+				local bottomSlotFrame = bottomSlot.frame
+
+				if not slotsOverlayFrame then
+					warn("[CustomizeUI] SlotsOverlay not found")
+					itemFrame:Destroy()
+					break
+				end
+
+				local topPosition = Vector2.new(topSlotFrame.AbsolutePosition.X, topSlotFrame.AbsolutePosition.Y)
+				local bottomRight = Vector2.new(
+					bottomSlotFrame.AbsolutePosition.X + bottomSlotFrame.AbsoluteSize.X,
+					bottomSlotFrame.AbsolutePosition.Y + bottomSlotFrame.AbsoluteSize.Y
+				)
+				local overlayPosition = Vector2.new(slotsOverlayFrame.AbsolutePosition.X, slotsOverlayFrame.AbsolutePosition.Y)
+
+				itemFrame.Parent = slotsOverlayFrame
+				itemFrame.AnchorPoint = Vector2.new(0, 0)
+				itemFrame.Position = UDim2.fromOffset(topPosition.X - overlayPosition.X, topPosition.Y - overlayPosition.Y)
+				itemFrame.Size = UDim2.fromOffset(bottomRight.X - topPosition.X, bottomRight.Y - topPosition.Y)
+				setGuiTreeZIndex(itemFrame, (slotsOverlayFrame.ZIndex or 1) + 1)
+
+				-- อัปเดต occupancy
+				for r = row, endRow do
+					for c = column, endColumn do
+						if slotOccupancy[r] then
+							slotOccupancy[r][c] = itemFrame
+						end
+					end
+				end
+
+				itemFrame:SetAttribute("ItemId", itemId)
+				itemFrame:SetAttribute("TopRow", row)
+				itemFrame:SetAttribute("TopColumn", column)
+
+				placedItems[#placedItems + 1] = itemFrame
+
+				-- Equip item บน preview bot
+				EquipmentManager.equipItem(itemId)
+
+				-- เพิ่ม InputBegan event สำหรับการลากกลับ
+				itemFrame.InputBegan:Connect(function(input)
+					if input.UserInputType == Enum.UserInputType.MouseButton1 then
+						beginSlotItemDrag(itemFrame)
+					end
+				end)
+
+			print("[CustomizeUI] Placed item", itemId, "at position", row, column)
+		else
+			warn("[CustomizeUI] Cannot place item", itemId, "at saved position", row, column, "- position occupied or invalid")
+		end
+	end
+
+	-- อัปเดต slot labels
+	updateSlotLabels()
+
+	-- Rebuild loadout items เพื่อลบ items ที่ถูกวางไปแล้ว
+	rebuildLoadoutItems()
+end
+
+setGuiTreeZIndex = function(guiObject: GuiObject, baseZIndex: number)
 	guiObject.ZIndex = baseZIndex
 	for _, descendant in ipairs(guiObject:GetDescendants()) do
 		if descendant:IsA("GuiObject") then
@@ -485,7 +635,7 @@ local function updateDragState(mousePosition: Vector2)
 	end
 end
 
-local function updateSlotLabels()
+updateSlotLabels = function()
 	-- อัปเดต visibility ของ LV1 labels ตาม slot occupancy
 	for row = 1, 2 do
 		for column = 1, 2 do
@@ -559,6 +709,12 @@ local function finalizePlacement(placement)
 	-- อัปเดต slot labels
 	updateSlotLabels()
 
+	-- Equip item บน preview bot
+	local itemId = dragContext.config and dragContext.config.id
+	if itemId then
+		EquipmentManager.equipItem(itemId)
+	end
+
 	-- เพิ่ม InputBegan event สำหรับการลากกลับ
 	ghost.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -629,6 +785,12 @@ local function finishDrag(success: boolean)
 			-- ถ้าลากมาจาก Slot ให้ลบออกแล้วสร้างใหม่ที่ LoadoutBar
 			if dragContext.isFromSlot and dragContext.occupiedCells then
 				print("[CustomizeUI] Item was from slot, removing and rebuilding")
+
+				-- Unequip item จาก preview bot
+				local itemId = ghost:GetAttribute("ItemId")
+				if itemId then
+					EquipmentManager.unequipItem(itemId)
+				end
 
 				-- ลบ item ออกจาก Slots
 				for _, cell in ipairs(dragContext.occupiedCells) do
@@ -1168,6 +1330,9 @@ local function setupPreviewBot()
 	-- Clone bot
 	previewBot = rescueModel:Clone()
 
+	-- ตั้งค่า target bot สำหรับ EquipmentManager
+	EquipmentManager.setTargetBot(previewBot)
+
 	-- หา Garage.Base
 	local garage = Workspace:FindFirstChild("Garage")
 	if not garage then
@@ -1371,6 +1536,9 @@ local function cleanupPreview()
 	-- Cleanup camera rotation controls
 	cleanupCameraRotation()
 
+	-- Cleanup equipped items
+	EquipmentManager.clearAll()
+
 	-- ลบ preview bot
 	if previewBot then
 		previewBot:Destroy()
@@ -1414,6 +1582,11 @@ function CustomizeUI.openCustomize()
 	setupPreviewBot()
 	panCameraToGarage()
 
+	-- โหลด equipped items จาก profile และวางลง Slots
+	task.delay(0.1, function()
+		loadEquippedItems()
+	end)
+
 	print("Customize opened")
 end
 
@@ -1422,6 +1595,26 @@ function CustomizeUI.closeCustomize()
 	if not isCustomizeOpen then return end
 
 	isCustomizeOpen = false
+
+	-- บันทึก equipped items พร้อมตำแหน่งไปยัง server
+	local equippedItemsWithPosition = {}
+	for _, placedItem in ipairs(placedItems) do
+		local itemId = placedItem:GetAttribute("ItemId")
+		local row = placedItem:GetAttribute("TopRow")
+		local column = placedItem:GetAttribute("TopColumn")
+
+		if itemId and row and column then
+			table.insert(equippedItemsWithPosition, {
+				id = itemId,
+				row = row,
+				column = column
+			})
+		end
+	end
+
+	-- บันทึกเสมอ แม้ว่าจะเป็น array ว่าง (unequip ทุกอย่าง)
+	CustomizeService.saveEquippedItems(equippedItemsWithPosition)
+	print("[CustomizeUI] Saved equipped items with positions:", equippedItemsWithPosition)
 
 	-- แสดง Player List กลับ
 	game:GetService("StarterGui"):SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, true)

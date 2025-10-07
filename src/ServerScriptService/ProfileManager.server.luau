@@ -4,11 +4,10 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local ServerScriptService = game:GetService("ServerScriptService")
 
-local ProfileService = require(ReplicatedStorage.Modules.ProfileService)
-
--- สร้าง ProfileService instance
-local profileService = ProfileService.new()
+-- ใช้ Shared ProfileService instance
+local profileService = require(ServerScriptService.SharedProfileService)
 
 -- เริ่ม Auto-Save
 profileService:_startAutoSave()
