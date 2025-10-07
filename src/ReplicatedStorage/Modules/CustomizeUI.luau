@@ -813,11 +813,17 @@ local function loadEquippedItems()
 
 	print("[CustomizeUI] Loading equipped items:")
 	local entries = {}
+	local colorLookup = currentColorScheme or {}
 	for index, equippedItem in ipairs(equippedItems) do
 		local id = tostring(equippedItem.id)
 		local row = equippedItem.row or -1
 		local column = equippedItem.column or -1
-		entries[#entries + 1] = string.format("#%d=%s(r=%d,c=%d)", index, id, row, column)
+		local colorEntry = colorLookup[id] or colorLookup[id .. "Model"]
+		local line = string.format("#%d=%s(r=%d,c=%d)", index, id, row, column)
+		if colorEntry then
+			line ..= string.format(" color=(%.2f,%.2f,%.2f)", colorEntry.r or colorEntry.R or 0, colorEntry.g or colorEntry.G or 0, colorEntry.b or colorEntry.B or 0)
+		end
+		entries[#entries + 1] = line
 	end
 	if #entries > 0 then
 		print("  { " .. table.concat(entries, ", ") .. " }")
@@ -2181,6 +2187,18 @@ function CustomizeUI.closeCustomize()
 
 	isCustomizeOpen = false
 
+	-- รวบรวมข้อมูลสีจาก preview (ใช้ทั้งกับ items และโมเดลจริง)
+	local colorScheme = collectColorScheme(previewBot)
+	local itemColorMap: {[string]: {r: number, g: number, b: number}} = {}
+	if colorScheme then
+		for path, color in pairs(colorScheme) do
+			local itemName = path:match("^[^/]+")
+			if itemName and not itemColorMap[itemName] then
+				itemColorMap[itemName] = color
+			end
+		end
+	end
+
 	-- บันทึก equipped items พร้อมตำแหน่งไปยัง server
 	local equippedItemsWithPosition = {}
 	for _, placedItem in ipairs(placedItems) do
@@ -2189,20 +2207,35 @@ function CustomizeUI.closeCustomize()
 		local column = placedItem:GetAttribute("TopColumn")
 
 		if itemId and row and column then
-			table.insert(equippedItemsWithPosition, {
+			local entry = {
 				id = itemId,
 				row = row,
-				column = column
-			})
+				column = column,
+			}
+			local colorForItem = itemColorMap[itemId] or itemColorMap[itemId .. "Model"]
+			if colorForItem then
+				entry.color = colorForItem
+			end
+			table.insert(equippedItemsWithPosition, entry)
 		end
 	end
 
 	-- บันทึกเสมอ แม้ว่าจะเป็น array ว่าง (unequip ทุกอย่าง)
 	CustomizeService.saveEquippedItems(equippedItemsWithPosition)
-	print("[CustomizeUI] Saved equipped items with positions:", equippedItemsWithPosition)
+	if #equippedItemsWithPosition > 0 then
+		local entries = {}
+		for _, entry in ipairs(equippedItemsWithPosition) do
+			local line = string.format("%s(r=%d,c=%d)", entry.id, entry.row, entry.column)
+			if entry.color then
+				line ..= string.format(" color=(%.2f,%.2f,%.2f)", entry.color.r, entry.color.g, entry.color.b)
+			end
+			entries[#entries + 1] = line
+		end
+		print("[CustomizeUI] Saved equipped items with positions:", entries)
+	else
+		print("[CustomizeUI] Saved equipped items with positions: { } (none)")
+	end
 
-	-- เก็บข้อมูลสีจาก preview แล้วส่งให้ server/โมเดลจริง
-	local colorScheme = collectColorScheme(previewBot)
 	currentColorScheme = colorScheme
 	CustomizeService.saveColorScheme(colorScheme)
 	applyColorSchemeToWorkspaceModels(colorScheme)
@@ -2212,7 +2245,7 @@ function CustomizeUI.closeCustomize()
 		for path, color in pairs(colorScheme) do
 			entries[#entries + 1] = string.format("%s=(%.2f,%.2f,%.2f)", path, color.r, color.g, color.b)
 		end
-		print("[CustomizeUI] Saved color scheme (table):", entries)
+		print("[CustomizeUI] Saved color scheme (table): { " .. table.concat(entries, ", ") .. " }")
 	else
 		print("[CustomizeUI] Color scheme empty (default colors in use)")
 	end

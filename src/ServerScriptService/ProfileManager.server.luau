@@ -53,7 +53,7 @@ local function onPlayerAdded(player: Player)
 					colorEntries[#colorEntries + 1] = string.format("%s=(%.2f,%.2f,%.2f)", path, c3.R, c3.G, c3.B)
 				end
 			end
-			print("     - Colors: { " .. table.concat(colorEntries, ", ") .. " }")
+			print("     - Colors:", colorEntries)
 		else
 			print("     - Colors: default")
 		end

@@ -19,7 +19,8 @@ export type InventoryItem = {
 export type EquippedItem = {
 	id: string,
 	row: number,
-	column: number
+	column: number,
+	color: { r: number, g: number, b: number }?
 }
 
 export type PlayerProfile = {
