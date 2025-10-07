@@ -1154,16 +1154,10 @@ local function createCustomizeUI()
 	inventoryPanel.Position = UDim2.new(1, -60, 0.08, 0)
 	inventoryPanel.AnchorPoint = Vector2.new(1, 0)
 	inventoryPanel.BackgroundColor3 = Color3.fromRGB(47, 51, 64)
-	inventoryPanel.BackgroundTransparency = 0.08
+	inventoryPanel.BackgroundTransparency = 0.8
 	inventoryPanel.BorderSizePixel = 0
 	inventoryPanel.ZIndex = 5
 	inventoryPanel.Parent = contentFrame
-
-	local inventoryStroke = Instance.new("UIStroke")
-	inventoryStroke.Color = Color3.fromRGB(85, 90, 105)
-	inventoryStroke.Thickness = 1
-	inventoryStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	inventoryStroke.Parent = inventoryPanel
 
 	local inventoryHeader = Instance.new("Frame")
 	inventoryHeader.Name = "InventoryHeader"
