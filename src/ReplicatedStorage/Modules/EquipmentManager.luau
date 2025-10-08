@@ -8,6 +8,36 @@ local EquipmentManager = {}
 -- ตัวแปรเก็บ equipped items
 local equippedItems: { [string]: Model } = {}
 local targetBot: Model? = nil
+local function toColor3(colorData: any): Color3?
+	if typeof(colorData) == "Color3" then
+		return colorData
+	elseif typeof(colorData) == "table" then
+		local r = colorData.r or colorData.R or colorData[1]
+		local g = colorData.g or colorData.G or colorData[2]
+		local b = colorData.b or colorData.B or colorData[3]
+		if typeof(r) == "number" and typeof(g) == "number" and typeof(b) == "number" then
+			r = math.clamp(r, 0, 1)
+			g = math.clamp(g, 0, 1)
+			b = math.clamp(b, 0, 1)
+			return Color3.new(r, g, b)
+		end
+	elseif typeof(colorData) == "string" then
+		if colorData:sub(1, 1) == "#" and (#colorData == 7 or #colorData == 9) then
+			local hex = colorData:sub(2)
+			local value = tonumber(hex, 16)
+			if value then
+				local r = math.floor(value / 0x10000) % 0x100
+				local g = math.floor(value / 0x100) % 0x100
+				local b = value % 0x100
+				r = r / 255
+				g = g / 255
+				b = b / 255
+				return Color3.new(r, g, b)
+			end
+		end
+	end
+	return nil
+end
 
 -- ตั้งค่า bot ที่จะ equip items
 function EquipmentManager.setTargetBot(bot: Model)
@@ -15,7 +45,7 @@ function EquipmentManager.setTargetBot(bot: Model)
 end
 
 -- Equip item บน bot
-function EquipmentManager.equipItem(itemId: string): boolean
+function EquipmentManager.equipItem(itemId: string, colorOverride: any?): boolean
 	-- ตรวจสอบว่ามี item นี้ equip อยู่แล้วหรือไม่
 	if equippedItems[itemId] then
 		warn("[EquipmentManager] Item already equipped:", itemId)
@@ -56,6 +86,20 @@ function EquipmentManager.equipItem(itemId: string): boolean
 
 	-- Parent item ไปที่ targetBot
 	clonedItem.Parent = targetBot
+
+	-- Apply color override ถ้ามี
+	local overrideColor = toColor3(colorOverride)
+	if overrideColor then
+		for _, descendant in ipairs(clonedItem:GetDescendants()) do
+			if descendant:IsA("BasePart") then
+				descendant.Color = overrideColor
+				descendant.Material = Enum.Material.SmoothPlastic
+			end
+		end
+		if clonedItem:IsA("Model") and clonedItem.PrimaryPart and clonedItem.PrimaryPart:IsA("BasePart") then
+			clonedItem.PrimaryPart.Color = overrideColor
+		end
+	end
 
 	-- Snap item ไปที่ Mount attachment
 	local botMountWorldCFrame = botMount.WorldCFrame

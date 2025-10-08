@@ -66,6 +66,25 @@ local function findPartByPath(model: Instance?, path: string): BasePart?
 	return nil
 end
 
+local function findPartByPathOrName(model: Instance?, path: string): BasePart?
+	local part = findPartByPath(model, path)
+	if part then
+		return part
+	end
+	if not model then
+		return nil
+	end
+	local partName = path:match("([^/]+)$")
+	if not partName then
+		return nil
+	end
+	local descendant = model:FindFirstChild(partName, true)
+	if descendant and descendant:IsA("BasePart") and not descendant:IsA("Seat") and descendant.Name ~= "VehicleSeat" then
+		return descendant
+	end
+	return nil
+end
+
 local function applyColorSchemeToModel(model: Model?, colorScheme: any)
 	if not model or not colorScheme then
 		return
@@ -80,9 +99,11 @@ local function applyColorSchemeToModel(model: Model?, colorScheme: any)
 			local path = entry.path
 			local color = toColor3(entry.color)
 			if typeof(path) == "string" and color then
-				local part = findPartByPath(model, path)
+				local part = findPartByPathOrName(model, path)
 				if part then
 					part.Color = color
+				else
+					print("[CustomizeServer] Missing path", path, "on", model.Name)
 				end
 			end
 		end
@@ -91,9 +112,11 @@ local function applyColorSchemeToModel(model: Model?, colorScheme: any)
 			if typeof(path) == "string" then
 				local color = toColor3(colorData)
 				if color then
-					local part = findPartByPath(model, path)
+					local part = findPartByPathOrName(model, path)
 					if part then
 						part.Color = color
+					else
+						print("[CustomizeServer] Missing path", path, "on", model.Name)
 					end
 				end
 			end
@@ -172,8 +195,25 @@ CustomizeService.onSaveEquipment(function(player: Player, equippedItems: {{id: s
 	-- บันทึก equipped items พร้อมตำแหน่ง
 	profile.bot = profile.bot or {}
 	profile.bot.inventory = profile.bot.inventory or {}
-	profile.bot.inventory.equipped = equippedItems
-	CompanionEquipment.applyForPlayer(player, equippedItems)
+	local sanitizedEquipped: {{id: string, row: number, column: number, color: {r: number, g: number, b: number}?}} = {}
+	for _, entry in ipairs(equippedItems) do
+		if typeof(entry) == "table" and typeof(entry.id) == "string" then
+			local sanitizedEntry = {
+				id = entry.id,
+				row = entry.row or 1,
+				column = entry.column or 1,
+			}
+			if entry.color then
+				local c3 = toColor3(entry.color)
+				if c3 then
+					sanitizedEntry.color = { r = c3.R, g = c3.G, b = c3.B }
+				end
+			end
+			table.insert(sanitizedEquipped, sanitizedEntry)
+		end
+	end
+	profile.bot.inventory.equipped = sanitizedEquipped
+	CompanionEquipment.applyForPlayer(player, sanitizedEquipped)
 
 	shouldSaveProfile[player] = true
 end)

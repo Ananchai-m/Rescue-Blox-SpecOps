@@ -124,6 +124,15 @@ local function getPlayerColorScheme(player: Player)
 	return profile and profile.bot and profile.bot.colors or nil
 end
 
+local function getEquippedItemId(entry): string?
+	if typeof(entry) == "string" then
+		return entry
+	elseif typeof(entry) == "table" then
+		return entry.id :: string?
+	end
+	return nil
+end
+
 -- ปิดการนั่งใน VehicleSeat ทั้งหมด
 local function disableVehicleSeats()
 	for _, descendant in ipairs(workspace:GetDescendants()) do
@@ -501,8 +510,19 @@ spawnCompanionEvent.OnServerEvent:Connect(function(player, position, orientation
 	local profile = profileService:GetProfile(player)
 	local equippedItems = profile and profile.bot and profile.bot.inventory and profile.bot.inventory.equipped or {}
 	local colorScheme = profile and profile.bot and profile.bot.colors
-	if colorScheme then
-		applyColorSchemeToModel(companion, colorScheme)
+	if colorScheme and next(colorScheme) then
+		local colorArray = {}
+		for path, color in pairs(colorScheme) do
+			table.insert(colorArray, {path = path, color = color})
+		end
+		local entries = {}
+		for _, entry in ipairs(colorArray) do
+			entries[#entries + 1] = string.format("%s=(%.2f,%.2f,%.2f)", entry.path, entry.color.r or 0, entry.color.g or 0, entry.color.b or 0)
+		end
+		print("[RescueBotServer] Applying companion color scheme: { " .. table.concat(entries, ", ") .. " }")
+		applyColorSchemeToModel(companion, colorArray)
+	else
+		print("[RescueBotServer] No companion color scheme for", player.Name)
 	end
 	CompanionEquipment.apply(companion, equippedItems)
 	foldDrillArm(companion, player.Name, "Companion")
@@ -1119,8 +1139,19 @@ spawnOriginalRescueEvent.OnServerEvent:Connect(function(player, position)
 	end
 
 	local rescueColorScheme = getPlayerColorScheme(player)
-	if rescueColorScheme then
-		applyColorSchemeToModel(originalRescueModel, rescueColorScheme)
+	if rescueColorScheme and next(rescueColorScheme) then
+		local colorArray = {}
+		for path, color in pairs(rescueColorScheme) do
+			table.insert(colorArray, {path = path, color = color})
+		end
+		local entries = {}
+		for _, entry in ipairs(colorArray) do
+			entries[#entries + 1] = string.format("%s=(%.2f,%.2f,%.2f)", entry.path, entry.color.r or 0, entry.color.g or 0, entry.color.b or 0)
+		end
+		print("[RescueBotServer] Applying rescue color scheme: { " .. table.concat(entries, ", ") .. " }")
+		applyColorSchemeToModel(originalRescueModel, colorArray)
+	else
+		print("[RescueBotServer] No rescue color scheme for", player.Name)
 	end
 
 	playerOriginalRescue[player] = originalRescueModel
@@ -1139,17 +1170,17 @@ spawnOriginalRescueEvent.OnServerEvent:Connect(function(player, position)
 			if profile.bot and profile.bot.inventory then
 				local equippedItems = profile.bot.inventory.equipped
 				if equippedItems and #equippedItems > 0 then
-					-- ตั้งค่า target bot สำหรับ EquipmentManager
 					EquipmentManager.setTargetBot(originalRescueModel)
-
-					-- Equip items ทั้งหมดที่อยู่ใน profile
 					for _, equippedItem in ipairs(equippedItems) do
-						local itemId = equippedItem.id
-						local success = EquipmentManager.equipItem(itemId)
-						if success then
-							print("[RescueBotServer] Equipped", itemId, "for", player.Name)
-						else
-							warn("[RescueBotServer] Failed to equip", itemId, "for", player.Name)
+						local itemId = getEquippedItemId(equippedItem)
+						if itemId then
+							local colorOverride = typeof(equippedItem) == "table" and equippedItem.color or nil
+							local success = EquipmentManager.equipItem(itemId, colorOverride)
+							if success then
+								print("[RescueBotServer] Equipped", itemId, "for", player.Name)
+							else
+								warn("[RescueBotServer] Failed to equip", itemId, "for", player.Name)
+							end
 						end
 					end
 				else

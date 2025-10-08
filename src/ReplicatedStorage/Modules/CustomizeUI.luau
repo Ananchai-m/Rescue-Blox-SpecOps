@@ -37,7 +37,20 @@ local activeColorButton: TextButton? = nil
 local colorPickerPartLabel: TextLabel? = nil
 local previewOriginalColors: {[BasePart]: Color3} = {}
 local previewDescendantConn: RBXScriptConnection? = nil
-local currentColorScheme: {{path: string, color: any}}? = nil
+local currentColorScheme: {[string]: {r: number, g: number, b: number}}? = nil
+
+local function getItemColorFromScheme(itemId: string, scheme: {[string]: {r: number, g: number, b: number}}?): {r: number, g: number, b: number}?
+	if not scheme then
+		return nil
+	end
+	for path, color in pairs(scheme) do
+		local firstSegment = path:match("^[^/]+")
+		if firstSegment == itemId or path:find(itemId, 1, true) then
+			return color
+		end
+	end
+	return nil
+end
 
 local function isSelectablePart(part: BasePart): boolean
 	if part.Name == "VehicleSeat" or part:IsA("Seat") or part:IsA("VehicleSeat") then
@@ -432,6 +445,22 @@ local function findPartByPath(root: Instance?, path: string): BasePart?
 	return nil
 end
 
+local function findPartByPathOrName(root: Instance?, path: string): BasePart?
+	local part = findPartByPath(root, path)
+	if part then
+		return part
+	end
+	local partName = path:match("([^/]+)$")
+	if not partName or not root then
+		return nil
+	end
+	local descendant = root:FindFirstChild(partName, true)
+	if descendant and descendant:IsA("BasePart") then
+		return descendant
+	end
+	return nil
+end
+
 local function collectColorScheme(model: Model?): {[string]: {r: number, g: number, b: number}}
 	local scheme = {}
 	if not model then
@@ -509,7 +538,7 @@ local function applyColorSchemeToModel(model: Model?, colorScheme: any)
 			local path = entry.path
 			local color = toColor3(entry.color)
 			if path and color then
-				local target = findPartByPath(model, path)
+				local target = findPartByPathOrName(model, path)
 				if target and isSelectablePart(target) then
 					target.Color = color
 				end
@@ -520,7 +549,7 @@ local function applyColorSchemeToModel(model: Model?, colorScheme: any)
 			if typeof(path) == "string" then
 				local color = toColor3(colorData)
 				if color then
-					local target = findPartByPath(model, path)
+					local target = findPartByPathOrName(model, path)
 					if target and isSelectablePart(target) then
 						target.Color = color
 					end
@@ -813,12 +842,24 @@ local function loadEquippedItems()
 
 	print("[CustomizeUI] Loading equipped items:")
 	local entries = {}
-	local colorLookup = currentColorScheme or {}
 	for index, equippedItem in ipairs(equippedItems) do
-		local id = tostring(equippedItem.id)
-		local row = equippedItem.row or -1
-		local column = equippedItem.column or -1
-		local colorEntry = colorLookup[id] or colorLookup[id .. "Model"]
+		local id
+		local row, column
+		if typeof(equippedItem) == "string" then
+			id = equippedItem
+			row, column = -1, -1
+		elseif typeof(equippedItem) == "table" then
+			id = tostring(equippedItem.id)
+			row = equippedItem.row or -1
+			column = equippedItem.column or -1
+		end
+		if not id then
+			continue
+		end
+		local colorEntry = getItemColorFromScheme(id, currentColorScheme)
+		if (not colorEntry) and typeof(equippedItem) == "table" and equippedItem.color then
+			colorEntry = equippedItem.color
+		end
 		local line = string.format("#%d=%s(r=%d,c=%d)", index, id, row, column)
 		if colorEntry then
 			line ..= string.format(" color=(%.2f,%.2f,%.2f)", colorEntry.r or colorEntry.R or 0, colorEntry.g or colorEntry.G or 0, colorEntry.b or colorEntry.B or 0)
@@ -944,7 +985,7 @@ local function loadEquippedItems()
 				placedItems[#placedItems + 1] = itemFrame
 
 				-- Equip item บน preview bot
-				EquipmentManager.equipItem(itemId)
+				EquipmentManager.equipItem(itemId, getItemColorFromScheme(itemId, currentColorScheme))
 
 				-- เพิ่ม InputBegan event สำหรับการลากกลับ
 				itemFrame.InputBegan:Connect(function(input)
@@ -1268,7 +1309,7 @@ local function finalizePlacement(placement)
 	-- Equip item บน preview bot
 	local itemId = dragContext.config and dragContext.config.id
 	if itemId then
-		EquipmentManager.equipItem(itemId)
+		EquipmentManager.equipItem(itemId, getItemColorFromScheme(itemId, currentColorScheme))
 	end
 
 	-- เพิ่ม InputBegan event สำหรับการลากกลับ
@@ -2192,9 +2233,10 @@ function CustomizeUI.closeCustomize()
 	local itemColorMap: {[string]: {r: number, g: number, b: number}} = {}
 	if colorScheme then
 		for path, color in pairs(colorScheme) do
-			local itemName = path:match("^[^/]+")
-			if itemName and not itemColorMap[itemName] then
-				itemColorMap[itemName] = color
+			itemColorMap[path] = color
+			local firstSegment = path:match("^[^/]+")
+			if firstSegment and not itemColorMap[firstSegment] then
+				itemColorMap[firstSegment] = color
 			end
 		end
 	end
@@ -2213,6 +2255,14 @@ function CustomizeUI.closeCustomize()
 				column = column,
 			}
 			local colorForItem = itemColorMap[itemId] or itemColorMap[itemId .. "Model"]
+			if not colorForItem then
+				for key, color in pairs(itemColorMap) do
+					if key:find(itemId, 1, true) then
+						colorForItem = color
+						break
+					end
+				end
+			end
 			if colorForItem then
 				entry.color = colorForItem
 			end
@@ -2245,7 +2295,7 @@ function CustomizeUI.closeCustomize()
 		for path, color in pairs(colorScheme) do
 			entries[#entries + 1] = string.format("%s=(%.2f,%.2f,%.2f)", path, color.r, color.g, color.b)
 		end
-		print("[CustomizeUI] Saved color scheme (table): { " .. table.concat(entries, ", ") .. " }")
+		print("[CustomizeUI] Saved color scheme (table):", entries)
 	else
 		print("[CustomizeUI] Color scheme empty (default colors in use)")
 	end
