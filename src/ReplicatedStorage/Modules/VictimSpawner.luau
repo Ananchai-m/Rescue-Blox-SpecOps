@@ -47,6 +47,27 @@ local function cloneVictimTemplate()
 	return clonedVictim
 end
 
+-- ฟังก์ชันตรวจสอบว่า part สามารถ SetNetworkOwner ได้หรือไม่
+local function canSetNetworkOwner(part)
+	if not part:IsA("BasePart") or part.Anchored then
+		return false
+	end
+
+	-- ตรวจสอบว่ามี weld/motor ไปยัง Anchored part หรือไม่
+	for _, joint in ipairs(part:GetJoints()) do
+		if joint:IsA("Motor6D") or joint:IsA("Weld") or joint:IsA("WeldConstraint") then
+			local part0 = joint:FindFirstChild("Part0") and joint.Part0
+			local part1 = joint:FindFirstChild("Part1") and joint.Part1
+
+			if (part0 and part0.Anchored) or (part1 and part1.Anchored) then
+				return false
+			end
+		end
+	end
+
+	return true
+end
+
 -- ฟังก์ชัน spawn victim ที่ตำแหน่งที่กำหนด
 local function spawnVictimAtPosition(position, spawnPointName)
 	local victim = cloneVictimTemplate()
@@ -92,6 +113,17 @@ local function spawnVictimAtPosition(position, spawnPointName)
 	-- ปรับตำแหน่งให้เท้าอยู่บนพื้นผิว
 	local adjustedPosition = position + Vector3.new(0, victimHeight, 0)
 	victim:PivotTo(CFrame.new(adjustedPosition))
+
+	-- Set Network Owner เป็น server เพื่อลดการกระตุกของฟิสิกส์
+	-- เฉพาะ HumanoidRootPart เท่านั้น เพราะเป็น primary part ที่ควบคุมฟิสิกส์ทั้งหมด
+	if rootPart and canSetNetworkOwner(rootPart) then
+		local success = pcall(function()
+			rootPart:SetNetworkOwner(nil)
+		end)
+		if success then
+			print("Set NetworkOwner for", victim.Name, "HumanoidRootPart")
+		end
+	end
 
 	-- ระบบ rescue ใช้ CustomRescueSystem แทน ProximityPrompt แล้ว
 

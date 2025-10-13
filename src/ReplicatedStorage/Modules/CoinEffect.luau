@@ -237,10 +237,14 @@ local function animateCoinGui(
 	delay: number,
 	onComplete: () -> ()
 )
-	task.wait(delay)
+	-- Use task.spawn to avoid blocking main thread
+	task.spawn(function()
+		if delay > 0 then
+			task.wait(delay)
+		end
 
-	-- Set initial position
-	coinGui.Position = startPos
+		-- Set initial position
+		coinGui.Position = startPos
 
 	-- Bounce animation
 	local bounceInfo = TweenInfo.new(
@@ -295,6 +299,7 @@ local function animateCoinGui(
 			coinGui:Destroy()
 			onComplete()
 		end)
+	end)
 	end)
 end
 
