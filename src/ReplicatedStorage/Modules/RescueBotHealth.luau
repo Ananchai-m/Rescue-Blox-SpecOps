@@ -197,8 +197,20 @@ function RescueBotHealth.new(rescueModel: Model, options: ConstructorOptions?): 
 	self.rescueModel = rescueModel
 	self.currentHP = botSettings.maxHP
 	self.maxHP = botSettings.maxHP
-	self.currentBattery = botSettings.maxBattery
-	self.maxBattery = botSettings.maxBattery
+
+	-- เช็คว่ามี SolarCell ติดตั้งหรือไม่
+	local hasSolarCell = false
+	local solarCell = rescueModel:FindFirstChild("SolarCell", true)
+	if solarCell then
+		hasSolarCell = true
+		print("[RescueBotHealth] SolarCell detected - Battery x2")
+	end
+
+	-- ถ้ามี SolarCell ให้ Battery เป็น 2 เท่า
+	local batteryMultiplier = hasSolarCell and 2 or 1
+	self.maxBattery = botSettings.maxBattery * batteryMultiplier
+	self.currentBattery = self.maxBattery
+
 	self._connections = {}
 	self._isDead = false
 	self._crashEffect = nil

@@ -1156,43 +1156,41 @@ spawnOriginalRescueEvent.OnServerEvent:Connect(function(player, position)
 
 	playerOriginalRescue[player] = originalRescueModel
 
-	-- สร้าง RescueBotHealth instance
+	-- โหลด equipped items จาก profile ก่อน
+	local profile = profileService:GetProfile(player)
+	if profile then
+		if profile.bot and profile.bot.inventory then
+			local equippedItems = profile.bot.inventory.equipped
+			if equippedItems and #equippedItems > 0 then
+				EquipmentManager.setTargetBot(originalRescueModel)
+				for _, equippedItem in ipairs(equippedItems) do
+					local itemId = getEquippedItemId(equippedItem)
+					if itemId then
+						local colorOverride = typeof(equippedItem) == "table" and equippedItem.color or nil
+						local success = EquipmentManager.equipItem(itemId, colorOverride)
+						if success then
+							print("[RescueBotServer] Equipped", itemId, "for", player.Name)
+						else
+							warn("[RescueBotServer] Failed to equip", itemId, "for", player.Name)
+						end
+					end
+				end
+			else
+				print("[RescueBotServer] No equipped items found for", player.Name)
+			end
+		else
+			print("[RescueBotServer] No inventory data for", player.Name)
+		end
+	else
+		warn("[RescueBotServer] Profile not found for", player.Name)
+	end
+
+	-- สร้าง RescueBotHealth instance หลังจากติดตั้ง Equipment แล้ว
 	local healthInstance = RescueBotHealth.new(originalRescueModel, {
 		onTimeout = handleRescueBotTimeout,
 	})
 	rescueBotHealthInstances[player] = healthInstance
 	print("[RescueBotServer] Created RescueBotHealth for", player.Name)
-
-	-- โหลด equipped items จาก profile
-	task.spawn(function()
-		local profile = profileService:GetProfile(player)
-		if profile then
-			if profile.bot and profile.bot.inventory then
-				local equippedItems = profile.bot.inventory.equipped
-				if equippedItems and #equippedItems > 0 then
-					EquipmentManager.setTargetBot(originalRescueModel)
-					for _, equippedItem in ipairs(equippedItems) do
-						local itemId = getEquippedItemId(equippedItem)
-						if itemId then
-							local colorOverride = typeof(equippedItem) == "table" and equippedItem.color or nil
-							local success = EquipmentManager.equipItem(itemId, colorOverride)
-							if success then
-								print("[RescueBotServer] Equipped", itemId, "for", player.Name)
-							else
-								warn("[RescueBotServer] Failed to equip", itemId, "for", player.Name)
-							end
-						end
-					end
-				else
-					print("[RescueBotServer] No equipped items found for", player.Name)
-				end
-			else
-				print("[RescueBotServer] No inventory data for", player.Name)
-			end
-		else
-			warn("[RescueBotServer] Profile not found for", player.Name)
-		end
-	end)
 
 	foldDrillArm(originalRescueModel, player.Name, "OriginalRescue")
 
