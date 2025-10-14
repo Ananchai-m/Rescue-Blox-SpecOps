@@ -941,14 +941,6 @@ end
 connections.inputBegan = UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
 
-	if input.KeyCode == Enum.KeyCode.F then
-		if VehicleController.getOriginalRescueModel() then
-			stopOriginalRescueMode()
-		elseif isRescueMode then
-			stopRescueMode()
-		end
-	end
-
 	-- Toggle Drill Mode with Q key
 	if input.KeyCode == Enum.KeyCode.Q then
 		if isRescueMode or VehicleController.getOriginalRescueModel() then
