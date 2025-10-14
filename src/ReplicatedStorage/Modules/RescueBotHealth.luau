@@ -549,6 +549,13 @@ function RescueBotHealth:DrainBattery(amount: number)
 			end
 		end
 	end
+
+	-- ถ้า Battery หมด ให้ตายเหมือน HP หมด
+	if typedSelf.currentBattery <= 0 and not typedSelf._isDead then
+		typedSelf._isDead = true
+		warn("[RescueBotHealth] Battery depleted - RescueBot SHUTDOWN!")
+		typedSelf:_onDeath()
+	end
 end
 
 -- ชาร์จแบตเตอรี่
