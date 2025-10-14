@@ -32,7 +32,7 @@ local colorCorrection = nil
 local originalFogEnd = nil
 local humanoidHighlights = {}
 local humanoidScanConnection = nil
-local THERMAL_DETECTION_RANGE = 10 -- studs
+local THERMAL_DETECTION_RANGE = 20 -- studs
 local cameraYaw = 0
 local cameraPitch = 0
 local MAX_YAW = math.rad(180)
@@ -170,13 +170,14 @@ end
 
 -- ===== HUMANOID DETECTION FUNCTIONS =====
 
-local function createHumanoidHighlight(humanoidCharacter)
+local function createHumanoidHighlight(humanoidCharacter, canSeeThroughWalls)
 	local highlight = Instance.new("Highlight")
 	highlight.FillColor = Color3.new(1, 0.5, 0) -- สีส้ม
 	highlight.OutlineColor = Color3.new(1, 0.3, 0) -- สีส้มเข้ม
 	highlight.FillTransparency = 0.3
 	highlight.OutlineTransparency = 0
-	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	-- ถ้ามี ThermometerCamera ให้เห็นทะลุกำแพง
+	highlight.DepthMode = canSeeThroughWalls and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
 	highlight.Parent = humanoidCharacter
 	return highlight
 end
@@ -191,14 +192,6 @@ end
 local function scanForHumanoids()
 	print("CameraSystem: Scanning for humanoids...")
 
-	-- ล้าง highlight เก่า
-	for character, highlight in pairs(humanoidHighlights) do
-		if highlight then
-			highlight:Destroy()
-		end
-	end
-	humanoidHighlights = {}
-
 	local detectionOrigin
 	if camera and camera.CFrame then
 		detectionOrigin = camera.CFrame.Position
@@ -207,6 +200,21 @@ local function scanForHumanoids()
 	if not detectionOrigin then
 		return
 	end
+
+	-- เช็คว่ามี ThermometerCamera หรือไม่
+	local equippedItems = CustomizeService.getEquippedItems()
+	local hasThermometerCamera = false
+	if equippedItems then
+		for _, equippedItem in ipairs(equippedItems) do
+			if equippedItem.id == "ThermometerCamera" then
+				hasThermometerCamera = true
+				break
+			end
+		end
+	end
+
+	-- เก็บรายชื่อ humanoid ที่เจอในรอบนี้
+	local foundHumanoids = {}
 
 	-- สแกนหา Humanoid ทั้งหมดใน workspace (รวม VictimFolders)
 	for _, obj in pairs(workspace:GetDescendants()) do
@@ -217,12 +225,30 @@ local function scanForHumanoids()
 				if rootPart then
 					local distance = (rootPart.Position - detectionOrigin).Magnitude
 					if distance <= THERMAL_DETECTION_RANGE then
-						local highlight = createHumanoidHighlight(obj)
-						humanoidHighlights[obj] = highlight
-						print("CameraSystem: Detected humanoid:", obj.Name)
+						-- ถ้ามี ThermometerCamera ให้เห็นทะลุกำแพงได้เลยตามระยะ THERMAL_DETECTION_RANGE
+						if hasThermometerCamera then
+							foundHumanoids[obj] = true
+							-- ถ้ายังไม่มี highlight ให้สร้างใหม่
+							if not humanoidHighlights[obj] then
+								local highlight = createHumanoidHighlight(obj, true)
+								humanoidHighlights[obj] = highlight
+								print("CameraSystem: Detected humanoid (thermal through walls):", obj.Name)
+							end
+						end
 					end
 				end
 			end
+		end
+	end
+
+	-- ลบ highlight ที่ไม่ได้อยู่ในรายชื่อที่เจอ (ถอยออกนอกระยะแล้ว)
+	for character, highlight in pairs(humanoidHighlights) do
+		if not foundHumanoids[character] then
+			if highlight then
+				highlight:Destroy()
+				print("CameraSystem: Removed highlight for:", character.Name)
+			end
+			humanoidHighlights[character] = nil
 		end
 	end
 end
@@ -390,8 +416,25 @@ function CameraSystem.startCameraTracking()
 			local rotation = CFrame.Angles(0, cameraYaw, 0) * CFrame.Angles(cameraPitch, 0, 0)
 			local finalCFrame = baseCFrame * rotation
 			local lookDirection = finalCFrame.RightVector
-			local cameraPosition = finalCFrame.Position + (lookDirection * 5)
-			camera.CFrame = CFrame.lookAt(cameraPosition, cameraPosition + lookDirection)
+			local targetCameraPosition = finalCFrame.Position + (lookDirection * 5)
+
+			-- กล้องเช็ค Raycast ปกติเสมอ (ไม่ทะลุกำแพง)
+			local rayDirection = targetCameraPosition - finalCFrame.Position
+			local rayDistance = rayDirection.Magnitude
+
+			local raycastParams = RaycastParams.new()
+			raycastParams.FilterDescendantsInstances = {rescueVehicle, player.Character}
+			raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+
+			local raycastResult = workspace:Raycast(finalCFrame.Position, rayDirection, raycastParams)
+
+			local finalCameraPosition = targetCameraPosition
+			if raycastResult then
+				-- ถ้าชนสิ่งกีดขวาง ให้วางกล้องที่จุดชนแทน (ถอยห่างออกมา 0.5 studs)
+				finalCameraPosition = raycastResult.Position - (rayDirection.Unit * 0.5)
+			end
+
+			camera.CFrame = CFrame.lookAt(finalCameraPosition, finalCameraPosition + lookDirection)
 		else
 			-- ถ้า Camera part หายไป ให้หยุดติดตาม
 			CameraSystem.stopCameraTracking()
