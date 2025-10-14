@@ -1712,6 +1712,11 @@ local function startGame()
 		table.insert(playersArray, player.Name)
 	end
 
+	-- Clear obstacles และ victims เก่าก่อน (ป้องกันการ spawn ซ้ำ)
+	print("Clearing old obstacles and victims before spawning new ones...")
+	VictimSpawner.clearAllObstacles()
+	VictimSpawner.clearAllVictims()
+
 	-- Spawn obstacles ก่อน (จาก ServerStorage.Models.Obstacles -> workspace.Building_LV1.Obstacles)
 	print("Spawning obstacles for the game...")
 	local obstaclesSpawned = VictimSpawner.spawnAllObstacles()
