@@ -82,11 +82,48 @@ function EquipmentManager.equipItem(itemId: string, colorOverride: any?): boolea
 			end
 		end
 
-		-- ตั้ง Attribute ว่า DrillArm equipped
+			-- ตั้ง Attribute ว่า DrillArm equipped
 		targetBot:SetAttribute("DrillArmEquipped", true)
 
 		print("[EquipmentManager] Showed DrillArm parts")
 		equippedItems[itemId] = drillArmModel
+		return true
+	end
+
+	-- สำหรับ Camera: ใช้เทคนิคซ่อน/แสดง (ไม่ clone) เหมือน DrillArm
+	if itemId == "Camera" or itemId == "ThermometerCamera" or itemId == "Zoom3x5xCamera" then
+		-- หา Camera part ที่ซ่อนอยู่ใน bot
+		local cameraPart = targetBot:FindFirstChild("Camera")
+
+		if not cameraPart then
+			warn("[EquipmentManager] Camera part not found in bot:", targetBot.Name)
+			return false
+		end
+
+		if not cameraPart:IsA("BasePart") then
+			warn("[EquipmentManager] Camera is not a BasePart:", cameraPart.ClassName)
+			return false
+		end
+
+		-- แสดง Camera part (ถ้ายังซ่อนอยู่)
+		if cameraPart.Transparency == 1 then
+			cameraPart.Transparency = 0
+			print("[EquipmentManager] Showed Camera part on", targetBot.Name)
+		end
+
+		-- ตั้ง Attribute ว่า Camera equipped (สามารถมีหลาย Attributes พร้อมกัน)
+		if itemId == "Camera" then
+			targetBot:SetAttribute("CameraEquipped", true)
+			print("[EquipmentManager] Enabled Camera (default) on", targetBot.Name)
+		elseif itemId == "ThermometerCamera" then
+			targetBot:SetAttribute("ThermometerCameraEquipped", true)
+			print("[EquipmentManager] Enabled ThermometerCamera (Thermal Vision) on", targetBot.Name)
+		else
+			targetBot:SetAttribute("Zoom3x5xCameraEquipped", true)
+			print("[EquipmentManager] Enabled Zoom3x5xCamera (Zoom 3x-5x) on", targetBot.Name)
+		end
+
+		equippedItems[itemId] = cameraPart
 		return true
 	end
 
@@ -197,11 +234,42 @@ function EquipmentManager.unequipItem(itemId: string): boolean
 			end
 		end
 
-		-- ลบ Attribute
+			-- ลบ Attribute
 		targetBot:SetAttribute("DrillArmEquipped", false)
 
 		print("[EquipmentManager] Hid DrillArm parts")
 		equippedItems[itemId] = nil
+		return true
+	end
+
+	-- สำหรับ Camera: ลบ Attribute แต่ซ่อน part เฉพาะตอน unequip ทั้งหมด
+	if (itemId == "Camera" or itemId == "ThermometerCamera" or itemId == "Zoom3x5xCamera") and targetBot then
+		-- ลบ Attribute สำหรับ Camera ชนิดนี้
+		if itemId == "Camera" then
+			targetBot:SetAttribute("CameraEquipped", false)
+			print("[EquipmentManager] Disabled Camera (default) on", targetBot.Name)
+		elseif itemId == "ThermometerCamera" then
+			targetBot:SetAttribute("ThermometerCameraEquipped", false)
+			print("[EquipmentManager] Disabled ThermometerCamera (Thermal Vision) on", targetBot.Name)
+		else
+			targetBot:SetAttribute("Zoom3x5xCameraEquipped", false)
+			print("[EquipmentManager] Disabled Zoom3x5xCamera (Zoom 3x-5x) on", targetBot.Name)
+		end
+
+		equippedItems[itemId] = nil
+
+		-- เช็คว่ายังมี Camera ชนิดอื่นที่ equipped อยู่หรือไม่
+		local hasAnyCamera = equippedItems["Camera"] or equippedItems["ThermometerCamera"] or equippedItems["Zoom3x5xCamera"]
+
+		-- ซ่อน Camera part เฉพาะตอนที่ไม่มี Camera ชนิดใดเลย
+		if not hasAnyCamera then
+			local cameraPart = targetBot:FindFirstChild("Camera")
+			if cameraPart and cameraPart:IsA("BasePart") then
+				cameraPart.Transparency = 1
+				print("[EquipmentManager] Hid Camera part (no camera equipped) on", targetBot.Name)
+			end
+		end
+
 		return true
 	end
 
@@ -233,13 +301,24 @@ function EquipmentManager.clearAll()
 			end
 		end
 
-		-- ลบ Attribute
+			-- ลบ Attribute
 		targetBot:SetAttribute("DrillArmEquipped", false)
+
+		-- ซ่อน Camera parts
+		local cameraPart = targetBot:FindFirstChild("Camera")
+		if cameraPart and cameraPart:IsA("BasePart") then
+			cameraPart.Transparency = 1
+		end
+
+		-- ลบ Camera Attributes
+		targetBot:SetAttribute("CameraEquipped", false)
+		targetBot:SetAttribute("ThermometerCameraEquipped", false)
+		targetBot:SetAttribute("Zoom3x5xCameraEquipped", false)
 	end
 
 	-- ลบ items อื่นๆ
 	for itemId, item in pairs(equippedItems) do
-		if item and itemId ~= "DrillArm" then
+		if item and itemId ~= "DrillArm" and itemId ~= "Camera" and itemId ~= "ThermometerCamera" and itemId ~= "Zoom3x5xCamera" then
 			item:Destroy()
 		end
 	end

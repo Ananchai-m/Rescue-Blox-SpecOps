@@ -156,6 +156,9 @@ function CompanionEquipment.apply(companion: Model?, equippedItems: any)
 	-- ใช้ EquipmentManager สำหรับ equip items ทั้งหมด ยกเว้น SolarCell
 	EquipmentManager.setTargetBot(companion)
 
+	-- Clear equipment เก่าก่อน (ซ่อน DrillArm และ Camera)
+	EquipmentManager.clearAll()
+
 	if typeof(equippedItems) == "table" then
 		for _, item in ipairs(equippedItems) do
 			if item and item.id then

@@ -7,6 +7,7 @@ local Players = game:GetService("Players")
 
 local CustomizeService = require(ReplicatedStorage.Modules.CustomizeService)
 local CompanionEquipment = require(ReplicatedStorage.Modules.CompanionEquipment)
+local EquipmentManager = require(ReplicatedStorage.Modules.EquipmentManager)
 
 -- ใช้ Shared ProfileService instance
 local profileService = require(ServerScriptService.SharedProfileService)
@@ -196,6 +197,7 @@ CustomizeService.onSaveEquipment(function(player: Player, equippedItems: {{id: s
 	profile.bot = profile.bot or {}
 	profile.bot.inventory = profile.bot.inventory or {}
 	local sanitizedEquipped: {{id: string, row: number, column: number, color: {r: number, g: number, b: number}?}} = {}
+
 	for _, entry in ipairs(equippedItems) do
 		if typeof(entry) == "table" and typeof(entry.id) == "string" then
 			local sanitizedEntry = {
@@ -213,7 +215,31 @@ CustomizeService.onSaveEquipment(function(player: Player, equippedItems: {{id: s
 		end
 	end
 	profile.bot.inventory.equipped = sanitizedEquipped
+
+	-- Apply equipment สำหรับ RescueCompanion
 	CompanionEquipment.applyForPlayer(player, sanitizedEquipped)
+
+	-- Apply equipment สำหรับ Original Rescue
+	local rescueModel = workspace:FindFirstChild(player.Name .. "_Rescue")
+	if rescueModel and rescueModel:IsA("Model") then
+		EquipmentManager.setTargetBot(rescueModel)
+		-- Clear equipment เก่าก่อน (ซ่อน DrillArm และ Camera)
+		EquipmentManager.clearAll()
+		-- Equip items ใหม่ทั้งหมด
+		for _, equippedItem in ipairs(sanitizedEquipped) do
+			local itemId = equippedItem.id
+			if itemId then
+				local colorOverride = equippedItem.color or nil
+				local success = EquipmentManager.equipItem(itemId, colorOverride)
+				if success then
+					print("[CustomizeServer] Equipped", itemId, "on Original Rescue for", player.Name)
+				else
+					warn("[CustomizeServer] Failed to equip", itemId, "on Original Rescue for", player.Name)
+				end
+			end
+		end
+		print("[CustomizeServer] Applied equipment to Original Rescue for", player.Name)
+	end
 
 	shouldSaveProfile[player] = true
 end)

@@ -1983,6 +1983,13 @@ local function setupPreviewBot()
 		end
 	end
 
+	-- ซ่อน Camera part ตั้งแต่แรก (เหมือน DrillArm)
+	local cameraPart = previewBot:FindFirstChild("Camera")
+	if cameraPart and cameraPart:IsA("BasePart") then
+		cameraPart.Transparency = 1
+		print("[CustomizeUI] Hidden Camera part in preview bot")
+	end
+
 	if previewDescendantConn then
 		previewDescendantConn:Disconnect()
 		previewDescendantConn = nil
@@ -2302,6 +2309,7 @@ function CustomizeUI.closeCustomize()
 
 	-- บันทึก equipped items พร้อมตำแหน่งไปยัง server
 	local equippedItemsWithPosition = {}
+
 	for _, placedItem in ipairs(placedItems) do
 		local itemId = placedItem:GetAttribute("ItemId")
 		local row = placedItem:GetAttribute("TopRow")

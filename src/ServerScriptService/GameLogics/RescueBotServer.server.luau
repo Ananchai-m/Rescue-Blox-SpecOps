@@ -539,6 +539,15 @@ spawnCompanionEvent.OnServerEvent:Connect(function(player, position, orientation
 		end
 	end
 
+	-- ซ่อน Camera part ตั้งแต่แรก (เหมือน DrillArm)
+	local cameraPart = companion:FindFirstChild("Camera")
+	if cameraPart and cameraPart:IsA("BasePart") then
+		cameraPart.Transparency = 1
+		print("[RescueBotServer] Hidden Camera part in companion for", player.Name)
+	else
+		print("[RescueBotServer] No Camera part found in companion for", player.Name)
+	end
+
 	-- Apply equipped items (จะแสดง DrillArm ถ้ามีใน equippedItems)
 	CompanionEquipment.apply(companion, equippedItems)
 	foldDrillArm(companion, player.Name, "Companion")
@@ -1187,6 +1196,15 @@ spawnOriginalRescueEvent.OnServerEvent:Connect(function(player, position)
 		end
 	end
 
+	-- ซ่อน Camera part ตั้งแต่แรก (เหมือน DrillArm)
+	local cameraPart = originalRescueModel:FindFirstChild("Camera")
+	if cameraPart and cameraPart:IsA("BasePart") then
+		cameraPart.Transparency = 1
+		print("[RescueBotServer] Hidden Camera part in", player.Name)
+	else
+		print("[RescueBotServer] No Camera part found in", player.Name)
+	end
+
 	-- โหลด equipped items จาก profile ก่อน
 	local profile = profileService:GetProfile(player)
 	if profile then
@@ -1194,6 +1212,9 @@ spawnOriginalRescueEvent.OnServerEvent:Connect(function(player, position)
 			local equippedItems = profile.bot.inventory.equipped
 			if equippedItems and #equippedItems > 0 then
 				EquipmentManager.setTargetBot(originalRescueModel)
+				-- Clear equipment เก่าก่อน (ซ่อน DrillArm และ Camera)
+				EquipmentManager.clearAll()
+				-- Equip items ใหม่ทั้งหมด
 				for _, equippedItem in ipairs(equippedItems) do
 					local itemId = getEquippedItemId(equippedItem)
 					if itemId then
