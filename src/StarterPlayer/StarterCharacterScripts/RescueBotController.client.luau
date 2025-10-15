@@ -1000,31 +1000,41 @@ connections.inputBegan = UserInputService.InputBegan:Connect(function(input, gam
 		local mouse = player:GetMouse()
 		local clickPosition = mouse.Hit.Position
 
-		-- เช็คว่า DrillArm อยู่ที่ TargetAngle = 0 หรือไม่ และ Head.HingeConstraint.Enabled
+		-- เช็คว่า DrillArm equipped และ อยู่ที่ TargetAngle = 0 หรือไม่
 		local canDrill = false
 		local currentTargetAngle = nil
+		local isDrillArmEquipped = false
 		local currentRescueModel = VehicleController.getOriginalRescueModel() or rescueModel
 		if currentRescueModel then
-			local drillArm = currentRescueModel:FindFirstChild("DrillArm")
-			if drillArm then
-				-- เช็ค Tube2.HingeConstraint TargetAngle
-				local tube2 = drillArm:FindFirstChild("Tube2")
-				if tube2 then
-					local hingeConstraint = tube2:FindFirstChild("HingeConstraint")
-					if hingeConstraint then
-						currentTargetAngle = hingeConstraint.TargetAngle
-						print("[Click Debug] TargetAngle:", currentTargetAngle, "isDrillModeActive:", isDrillModeActive)
-						if hingeConstraint.TargetAngle == 0 then
-							canDrill = true
+			-- เช็คว่า DrillArm ถูก equipped หรือไม่
+			isDrillArmEquipped = currentRescueModel:GetAttribute("DrillArmEquipped") == true
+
+			if not isDrillArmEquipped then
+				print("[Drill Mode] DrillArm not equipped!")
+			else
+				local drillArm = currentRescueModel:FindFirstChild("DrillArm")
+				if drillArm then
+					-- เช็ค Tube2.HingeConstraint TargetAngle
+					local tube2 = drillArm:FindFirstChild("Tube2")
+					if tube2 then
+						local hingeConstraint = tube2:FindFirstChild("HingeConstraint")
+						if hingeConstraint then
+							currentTargetAngle = hingeConstraint.TargetAngle
+							print("[Click Debug] TargetAngle:", currentTargetAngle, "isDrillModeActive:", isDrillModeActive)
+							if hingeConstraint.TargetAngle == 0 then
+								canDrill = true
+							end
 						end
 					end
 				end
-
 			end
 		end
 
-		-- ลองเจาะได้ก็ต่อเมื่อ TargetAngle = 0 และเปิด Drill Mode
-		if canDrill and isDrillModeActive then
+		-- ลองเจาะได้ก็ต่อเมื่อ DrillArm equipped, TargetAngle = 0 และเปิด Drill Mode
+		if not isDrillArmEquipped then
+			-- ไม่มี DrillArm equipped
+			warn("[Drill Mode] Cannot drill! DrillArm is not equipped. Please equip DrillArm first.")
+		elseif canDrill and isDrillModeActive then
 			print("[Drill Mode] Drilling allowed - TargetAngle = 0")
 			local didDrill = DrillSystem.handleDrillingClick(clickPosition)
 

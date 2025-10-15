@@ -97,7 +97,7 @@ function ProfileTemplate.new(player: Player): PlayerProfile
 		},
 		bot = {
 			colors = {},
-			slotsUnlocked = 4,
+			slotsUnlocked = 8,
 			inventory = {
 				owned = {
 					-- Starter items

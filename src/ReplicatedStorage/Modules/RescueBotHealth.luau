@@ -55,7 +55,8 @@ export type RescueBotHealthType = {
 	_setupCollisionDetection: (self: RescueBotHealthType) -> (),
 	_setupRockDetection: (self: RescueBotHealthType) -> (),
 	_startBatteryDrain: (self: RescueBotHealthType) -> (),
-	_onDeath: (self: RescueBotHealthType) -> ()
+	_onDeath: (self: RescueBotHealthType) -> (),
+	_explodeRescueBot: (self: RescueBotHealthType) -> ()
 }
 
 local function getOwnerPlayer(typedSelf: RescueBotHealthType): Player?
@@ -426,8 +427,11 @@ function RescueBotHealth:_onDeath()
 
 			-- เริ่มนับถอยหลัง 30 วินาที
 			task.delay(30, function()
-				-- ถ้ายังไม่ฟื้น (HP ยังเป็น 0) ให้สรุปคะแนน
+				-- ถ้ายังไม่ฟื้น (HP ยังเป็น 0) ให้สรุปคะแนนและระเบิด
 				if typedSelf.currentHP <= 0 and typedSelf._isDead then
+					-- ระเบิด RescueBot (ทำให้ชิ้นส่วนกระเด็นออกมา)
+					typedSelf:_explodeRescueBot()
+
 					botDeathEvent:FireClient(player, "timeout")
 
 					-- Fire BotTimeout event เพื่อให้ server handler จัดการ
@@ -436,7 +440,7 @@ function RescueBotHealth:_onDeath()
 						botTimeoutEvent:Fire(player)
 					end
 
-					warn(`[RescueBotHealth] Player {player.Name} timeout - fired bindable event`)
+					warn(`[RescueBotHealth] Player {player.Name} timeout - RescueBot EXPLODED!`)
 				end
 			end)
 		end
@@ -621,6 +625,95 @@ function RescueBotHealth:Reset()
 	end
 
 	-- ลด log
+end
+
+-- ระเบิด RescueBot (ทำให้ชิ้นส่วนกระเด็นออกมา)
+function RescueBotHealth:_explodeRescueBot()
+	local typedSelf = self :: RescueBotHealthType
+	local rescueModel = typedSelf.rescueModel
+
+	if not rescueModel then
+		return
+	end
+
+	print("[RescueBotHealth] Exploding RescueBot:", rescueModel.Name)
+
+	-- ลบ weld/motor6D/attachment ทั้งหมดเพื่อให้ชิ้นส่วนแยกออก
+	for _, descendant in ipairs(rescueModel:GetDescendants()) do
+		if descendant:IsA("Weld") or descendant:IsA("Motor6D") or descendant:IsA("WeldConstraint") or descendant:IsA("Attachment") then
+			descendant:Destroy()
+		end
+	end
+
+	-- ทำให้ทุก part กระเด็นออกมา
+	local centerPosition = rescueModel.PrimaryPart and rescueModel.PrimaryPart.Position or rescueModel:GetPivot().Position
+	local explosionForce = 100 -- แรงระเบิด (ลดลงเพื่อไม่ให้กระเด็นไกลเกินไป)
+	local groundY = centerPosition.Y -- เก็บ Y ของพื้น
+
+	for _, descendant in ipairs(rescueModel:GetDescendants()) do
+		if descendant:IsA("BasePart") and not descendant:IsA("Seat") then
+			-- Unanchor
+			descendant.Anchored = false
+			descendant.CanCollide = true
+
+			-- ตั้งค่า physics properties
+			pcall(function()
+				descendant.CustomPhysicalProperties = PhysicalProperties.new(
+					0.5,  -- Density (เพิ่มความหนักเล็กน้อย)
+					0.5,  -- Friction
+					0.3,  -- Elasticity (ลดการตีกลับ)
+					1,    -- FrictionWeight
+					1     -- ElasticityWeight
+				)
+			end)
+
+			-- คำนวณทิศทางกระเด็นออกจากศูนย์กลาง (แนวนอนเป็นหลัก)
+			local direction = (descendant.Position - centerPosition).Unit
+			local randomOffset = Vector3.new(
+				math.random(-50, 50) / 100,
+				math.random(10, 50) / 100, -- กระเด็นขึ้นบนเล็กน้อย
+				math.random(-50, 50) / 100
+			)
+			local finalDirection = (direction + randomOffset).Unit
+
+			-- ใช้ AssemblyLinearVelocity (กระเด็นในแนวนอนเป็นหลัก)
+			local horizontalForce = Vector3.new(finalDirection.X, 0, finalDirection.Z).Unit * explosionForce
+			local verticalForce = Vector3.new(0, math.random(30, 60), 0) -- กระเด็นขึ้นเล็กน้อย
+			descendant.AssemblyLinearVelocity = horizontalForce + verticalForce
+
+			-- ให้หมุนสุ่ม
+			descendant.AssemblyAngularVelocity = Vector3.new(
+				math.random(-15, 15),
+				math.random(-15, 15),
+				math.random(-15, 15)
+			)
+
+			-- สร้าง BodyVelocity เพื่อไม่ให้ตกลงไปนอกแมพ (จะค่อยๆ ลดความเร็ว)
+			task.delay(0.5, function()
+				if descendant and descendant.Parent then
+					-- หยุดการตกลงไปเรื่อยๆ หลังจากระเบิด 0.5 วินาที
+					local currentVelocity = descendant.AssemblyLinearVelocity
+					descendant.AssemblyLinearVelocity = Vector3.new(
+						currentVelocity.X * 0.5,
+						math.max(currentVelocity.Y, -10), -- จำกัดความเร็วตกลง
+						currentVelocity.Z * 0.5
+					)
+				end
+			end)
+		end
+	end
+
+	-- ใช้ Debris Service เพื่อลบชิ้นส่วนหลังจาก 10 วินาที
+	local Debris = game:GetService("Debris")
+	for _, descendant in ipairs(rescueModel:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			Debris:AddItem(descendant, 10)
+		end
+	end
+
+	-- ลบ model หลังจาก 10 วินาที
+	Debris:AddItem(rescueModel, 10)
+	print("[RescueBotHealth] RescueBot explosion complete - will be removed in 10 seconds")
 end
 
 -- ทำลาย instance

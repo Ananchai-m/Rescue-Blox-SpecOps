@@ -524,6 +524,22 @@ spawnCompanionEvent.OnServerEvent:Connect(function(player, position, orientation
 	else
 		print("[RescueBotServer] No companion color scheme for", player.Name)
 	end
+	-- ซ่อน DrillArm parts ก่อน (จะถูกแสดงโดย CompanionEquipment.apply ถ้า equipped)
+	local tube1 = companion:FindFirstChild("Tube1")
+	local drillArmModel = companion:FindFirstChild("DrillArm")
+	for _, part in ipairs({tube1, drillArmModel}) do
+		if part and part:IsA("BasePart") then
+			part.Transparency = 1
+		elseif part and part:IsA("Model") then
+			for _, descendant in ipairs(part:GetDescendants()) do
+				if descendant:IsA("BasePart") then
+					descendant.Transparency = 1
+				end
+			end
+		end
+	end
+
+	-- Apply equipped items (จะแสดง DrillArm ถ้ามีใน equippedItems)
 	CompanionEquipment.apply(companion, equippedItems)
 	foldDrillArm(companion, player.Name, "Companion")
 
@@ -1155,6 +1171,21 @@ spawnOriginalRescueEvent.OnServerEvent:Connect(function(player, position)
 	end
 
 	playerOriginalRescue[player] = originalRescueModel
+
+	-- ซ่อน DrillArm parts ตั้งแต่แรก
+	local tube1 = originalRescueModel:FindFirstChild("Tube1")
+	local drillArmModel = originalRescueModel:FindFirstChild("DrillArm")
+	for _, part in ipairs({tube1, drillArmModel}) do
+		if part and part:IsA("BasePart") then
+			part.Transparency = 1
+		elseif part and part:IsA("Model") then
+			for _, descendant in ipairs(part:GetDescendants()) do
+				if descendant:IsA("BasePart") then
+					descendant.Transparency = 1
+				end
+			end
+		end
+	end
 
 	-- โหลด equipped items จาก profile ก่อน
 	local profile = profileService:GetProfile(player)

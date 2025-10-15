@@ -2,6 +2,7 @@
 -- จัดการการติดตั้งอุปกรณ์บน Rescue Companion ตามของที่ผู้เล่น equip
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local EquipmentManager = require(ReplicatedStorage.Modules.EquipmentManager)
 
 local CompanionEquipment = {}
 
@@ -152,6 +153,27 @@ function CompanionEquipment.apply(companion: Model?, equippedItems: any)
 		return
 	end
 
+	-- ใช้ EquipmentManager สำหรับ equip items ทั้งหมด ยกเว้น SolarCell
+	EquipmentManager.setTargetBot(companion)
+
+	if typeof(equippedItems) == "table" then
+		for _, item in ipairs(equippedItems) do
+			if item and item.id then
+				-- Skip SolarCell - จะใช้ attachSolarCell() แทน
+				if item.id ~= "SolarCell" then
+					local colorOverride = item.color or nil
+					local success = EquipmentManager.equipItem(item.id, colorOverride)
+					if success then
+						print("[CompanionEquipment] Equipped", item.id, "on companion")
+					else
+						warn("[CompanionEquipment] Failed to equip", item.id, "on companion")
+					end
+				end
+			end
+		end
+	end
+
+	-- Attach SolarCell_Companion (companion-specific asset)
 	attachSolarCell(companion, equippedItems)
 end
 

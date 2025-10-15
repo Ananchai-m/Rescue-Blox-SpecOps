@@ -139,6 +139,8 @@ type LoadoutConfig = {
 }
 
 local loadoutConfigs: { LoadoutConfig } = {
+	{ id = "Camera", displayName = "Camera", size = Vector2.new(1, 1) },
+	{ id = "DrillArm", displayName = "Drill Arm", size = Vector2.new(2, 1) },
 	{ id = "SolarCell", displayName = "SolarCell", size = Vector2.new(2, 1) },
 	{ id = "ThermometerCamera", displayName = "Thermometer\nCamera", size = Vector2.new(1, 1) },
 	{ id = "Zoom3x5xCamera", displayName = "Zoom3x-5x\nCamera", size = Vector2.new(1, 1) },
@@ -586,6 +588,48 @@ local function applyColorSchemeToWorkspaceModels(colorScheme: any)
 	end
 end
 
+local function applyEquippedItemsToWorkspaceModels(equippedItems: {{id: string, row: number, column: number, color: any?}})
+	local rescueModel = Workspace:FindFirstChild(player.Name .. "_Rescue")
+	local companionModel = Workspace:FindFirstChild(player.Name .. "_RescueCompanion")
+
+	-- Clear equipped items เก่าก่อน
+	if rescueModel then
+		EquipmentManager.setTargetBot(rescueModel)
+		EquipmentManager.clearAll()
+	end
+	if companionModel then
+		EquipmentManager.setTargetBot(companionModel)
+		EquipmentManager.clearAll()
+	end
+
+	-- Apply equipped items ใหม่
+	if equippedItems and #equippedItems > 0 then
+		for _, equippedItem in ipairs(equippedItems) do
+			local itemId = equippedItem.id
+
+			-- Apply to Rescue model
+			if rescueModel and rescueModel:IsA("Model") then
+				EquipmentManager.setTargetBot(rescueModel)
+				local success = EquipmentManager.equipItem(itemId, equippedItem.color)
+				if success then
+					print("[CustomizeUI] Equipped", itemId, "on Rescue")
+				end
+			end
+
+			-- Apply to Companion model
+			if companionModel and companionModel:IsA("Model") then
+				EquipmentManager.setTargetBot(companionModel)
+				local success = EquipmentManager.equipItem(itemId, equippedItem.color)
+				if success then
+					print("[CustomizeUI] Equipped", itemId, "on Companion")
+				end
+			end
+		end
+	end
+
+	print("[CustomizeUI] Applied equipped items to workspace models")
+end
+
 local function loadColorSchemeIntoPreview()
 	local colorScheme = CustomizeService.getColorScheme()
 	if colorScheme then
@@ -684,7 +728,7 @@ local function pickPreviewPartFromMouse(): BasePart?
 end
 
 local function isCellWithinAllowedArea(row: number, column: number): boolean
-	return row >= 1 and row <= 2 and column >= 1 and column <= 2
+	return row >= 1 and row <= 2 and column >= 1 and column <= 4
 end
 
 local function isPlacementWithinAllowedArea(startRow: number, startColumn: number, config: LoadoutConfig): boolean
@@ -1235,7 +1279,7 @@ end
 updateSlotLabels = function()
 	-- อัปเดต visibility ของ LV1 labels ตาม slot occupancy
 	for row = 1, 2 do
-		for column = 1, 2 do
+		for column = 1, 4 do
 			local cell = slotMap[row] and slotMap[row][column]
 			if cell then
 				local levelLabel = cell.frame:FindFirstChild("LevelTag")
@@ -1802,7 +1846,7 @@ local function createCustomizeUI()
 		local gridRow = math.floor((index - 1) / SLOT_COLUMNS)
 		local row = gridRow + 1
 		local column = gridColumn + 1
-		local isStarterSlot = gridRow < 2 and gridColumn < 2
+		local isStarterSlot = gridRow < 2 and gridColumn < 4
 
 		local slot = Instance.new("Frame")
 		slot.Name = string.format("Slot%d", index)
@@ -1923,6 +1967,21 @@ local function setupPreviewBot()
 	-- Clone bot
 	previewBot = rescueModel:Clone()
 	clearPreviewSelection()
+
+	-- ซ่อน DrillArm parts ตั้งแต่แรก
+	local tube1 = previewBot:FindFirstChild("Tube1")
+	local drillArmModel = previewBot:FindFirstChild("DrillArm")
+	for _, part in ipairs({tube1, drillArmModel}) do
+		if part and part:IsA("BasePart") then
+			part.Transparency = 1
+		elseif part and part:IsA("Model") then
+			for _, descendant in ipairs(part:GetDescendants()) do
+				if descendant:IsA("BasePart") then
+					descendant.Transparency = 1
+				end
+			end
+		end
+	end
 
 	if previewDescendantConn then
 		previewDescendantConn:Disconnect()
@@ -2299,6 +2358,9 @@ function CustomizeUI.closeCustomize()
 	else
 		print("[CustomizeUI] Color scheme empty (default colors in use)")
 	end
+
+	-- Apply equipped items to workspace models
+	applyEquippedItemsToWorkspaceModels(equippedItemsWithPosition)
 
 	-- แสดง Player List กลับ
 	game:GetService("StarterGui"):SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, true)

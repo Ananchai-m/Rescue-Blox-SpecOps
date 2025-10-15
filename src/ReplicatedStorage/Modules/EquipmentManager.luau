@@ -58,14 +58,46 @@ function EquipmentManager.equipItem(itemId: string, colorOverride: any?): boolea
 		return false
 	end
 
-	-- หา Assets ใน ReplicatedStorage
+	-- สำหรับ DrillArm: ใช้เทคนิคซ่อน/แสดง (ไม่ clone)
+	if itemId == "DrillArm" then
+		-- หา DrillArm items ที่ซ่อนอยู่ใน bot
+		local tube1 = targetBot:FindFirstChild("Tube1")
+		local drillArmModel = targetBot:FindFirstChild("DrillArm")
+
+		if not tube1 or not drillArmModel then
+			warn("[EquipmentManager] DrillArm parts not found in bot. Tube1:", tube1, "DrillArm:", drillArmModel)
+			return false
+		end
+
+		-- แสดง DrillArm parts
+		for _, part in ipairs({tube1, drillArmModel}) do
+			if part:IsA("BasePart") then
+				part.Transparency = 0
+			elseif part:IsA("Model") then
+				for _, descendant in ipairs(part:GetDescendants()) do
+					if descendant:IsA("BasePart") then
+						descendant.Transparency = 0
+					end
+				end
+			end
+		end
+
+		-- ตั้ง Attribute ว่า DrillArm equipped
+		targetBot:SetAttribute("DrillArmEquipped", true)
+
+		print("[EquipmentManager] Showed DrillArm parts")
+		equippedItems[itemId] = drillArmModel
+		return true
+	end
+
+	-- สำหรับ items อื่นๆ: ใช้วิธีเดิม (clone จาก Assets)
 	local assets = ReplicatedStorage:FindFirstChild("Assets")
 	if not assets then
 		warn("[EquipmentManager] ReplicatedStorage.Assets not found")
 		return false
 	end
 
-	local assetTemplate = assets:FindFirstChild(itemId)
+	local assetTemplate = assets:FindFirstChild(itemId) :: Model
 	if not assetTemplate then
 		warn("[EquipmentManager] Asset not found:", itemId)
 		return false
@@ -74,12 +106,18 @@ function EquipmentManager.equipItem(itemId: string, colorOverride: any?): boolea
 	-- Clone asset
 	local clonedItem = assetTemplate:Clone()
 
-	-- หา Mount attachments
-	local itemMount = clonedItem.PrimaryPart and clonedItem.PrimaryPart:FindFirstChild("Mount")
-	local botMount = targetBot.PrimaryPart:FindFirstChild("Mount")
+	-- กำหนด mount name ตามประเภท item
+	local mountName = "Mount"
 
+	-- หา Mount attachments
+	local itemMount: Attachment? = nil
+	itemMount = clonedItem.PrimaryPart and clonedItem.PrimaryPart:FindFirstChild("Mount") :: Attachment
+
+	local botMount = targetBot.PrimaryPart:FindFirstChild(mountName) :: Attachment
+
+	-- ตรวจสอบว่ามี mount attachments ครบ
 	if not itemMount or not botMount then
-		warn("[EquipmentManager] Mount attachment not found")
+		warn("[EquipmentManager] Mount attachment not found - itemMount:", itemMount, "botMount:", botMount, "mountName:", mountName)
 		clonedItem:Destroy()
 		return false
 	end
@@ -103,21 +141,28 @@ function EquipmentManager.equipItem(itemId: string, colorOverride: any?): boolea
 
 	-- Snap item ไปที่ Mount attachment
 	local botMountWorldCFrame = botMount.WorldCFrame
-	local itemMountLocalCFrame = itemMount.CFrame
+	local itemMountWorldCFrame = itemMount.WorldCFrame
 
-	-- คำนวณ offset จาก item's pivot ไปยัง item's mount
+	-- คำนวณ offset จาก item mount ไปยัง item pivot
 	local itemPivot = clonedItem:GetPivot()
-	local pivotToMount = itemPivot:Inverse() * clonedItem.PrimaryPart.CFrame * itemMountLocalCFrame
+	local mountToItemPivot = itemMountWorldCFrame:Inverse() * itemPivot
 
-	-- คำนวณตำแหน่งสุดท้ายของ item
-	local finalCFrame = botMountWorldCFrame * pivotToMount:Inverse()
+	-- ตำแหน่งสุดท้ายของ item = botMount * offset
+	local finalCFrame = botMountWorldCFrame * mountToItemPivot
 	clonedItem:PivotTo(finalCFrame)
 
-	-- Weld item เข้ากับ bot
-	local weld = Instance.new("WeldConstraint")
-	weld.Part0 = targetBot.PrimaryPart
-	weld.Part1 = clonedItem.PrimaryPart
-	weld.Parent = clonedItem.PrimaryPart
+	-- Weld item เข้ากับ bot (สำหรับ items อื่นๆ ที่ไม่ใช่ DrillArm)
+	local motor = Instance.new("Motor6D")
+	motor.Name = itemId .. "Motor"
+	motor.Part0 = targetBot.PrimaryPart
+	motor.Part1 = clonedItem.PrimaryPart
+
+	-- ตั้งค่า C0 และ C1 สำหรับ Motor6D
+	motor.C0 = targetBot.PrimaryPart.CFrame:Inverse() * clonedItem.PrimaryPart.CFrame
+	motor.C1 = CFrame.new()
+
+	motor.Parent = clonedItem.PrimaryPart
+	print("[EquipmentManager] Created Motor6D for", itemId)
 
 	-- เก็บ reference
 	equippedItems[itemId] = clonedItem
@@ -134,7 +179,33 @@ function EquipmentManager.unequipItem(itemId: string): boolean
 		return false
 	end
 
-	-- Destroy item
+	-- สำหรับ DrillArm: ซ่อนแทนการลบ
+	if itemId == "DrillArm" and targetBot then
+		local tube1 = targetBot:FindFirstChild("Tube1")
+		local drillArmModel = targetBot:FindFirstChild("DrillArm")
+
+		-- ซ่อน DrillArm parts
+		for _, part in ipairs({tube1, drillArmModel}) do
+			if part and part:IsA("BasePart") then
+				part.Transparency = 1
+			elseif part and part:IsA("Model") then
+				for _, descendant in ipairs(part:GetDescendants()) do
+					if descendant:IsA("BasePart") then
+						descendant.Transparency = 1
+					end
+				end
+			end
+		end
+
+		-- ลบ Attribute
+		targetBot:SetAttribute("DrillArmEquipped", false)
+
+		print("[EquipmentManager] Hid DrillArm parts")
+		equippedItems[itemId] = nil
+		return true
+	end
+
+	-- สำหรับ items อื่นๆ: ลบออก
 	equippedItem:Destroy()
 	equippedItems[itemId] = nil
 
@@ -144,8 +215,31 @@ end
 
 -- ลบ equipped items ทั้งหมด
 function EquipmentManager.clearAll()
+	-- สำหรับ DrillArm: ซ่อนแทนการลบ
+	if targetBot then
+		local tube1 = targetBot:FindFirstChild("Tube1")
+		local drillArmModel = targetBot:FindFirstChild("DrillArm")
+
+		-- ซ่อน DrillArm parts
+		for _, part in ipairs({tube1, drillArmModel}) do
+			if part and part:IsA("BasePart") then
+				part.Transparency = 1
+			elseif part and part:IsA("Model") then
+				for _, descendant in ipairs(part:GetDescendants()) do
+					if descendant:IsA("BasePart") then
+						descendant.Transparency = 1
+					end
+				end
+			end
+		end
+
+		-- ลบ Attribute
+		targetBot:SetAttribute("DrillArmEquipped", false)
+	end
+
+	-- ลบ items อื่นๆ
 	for itemId, item in pairs(equippedItems) do
-		if item then
+		if item and itemId ~= "DrillArm" then
 			item:Destroy()
 		end
 	end
