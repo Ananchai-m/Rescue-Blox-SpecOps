@@ -123,34 +123,42 @@ local function createShopUI()
 
 	local shopLabel = Instance.new("TextLabel")
 	shopLabel.Name = "SectionTitle"
-	shopLabel.Size = UDim2.new(0.15, 0, 1, 0)
+	shopLabel.Size = UDim2.fromScale(0.15, 1)
 	shopLabel.BackgroundTransparency = 1
 	shopLabel.Font = Enum.Font.GothamBold
 	shopLabel.Text = "Shop"
 	shopLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	shopLabel.TextSize = 28
 	shopLabel.TextScaled = true
 	shopLabel.TextXAlignment = Enum.TextXAlignment.Left
 	shopLabel.Parent = topBar
 
+	local shopConstraint = Instance.new("UITextSizeConstraint")
+	shopConstraint.MaxTextSize = 28
+	shopConstraint.MinTextSize = 16
+	shopConstraint.Parent = shopLabel
+
 	local brandLabel = Instance.new("TextLabel")
 	brandLabel.Name = "Brand"
-	brandLabel.Size = UDim2.new(0.3, 0, 1, 0)
-	brandLabel.Position = UDim2.new(0.5, 0, 0, 0)
+	brandLabel.Size = UDim2.fromScale(0.3, 1)
+	brandLabel.Position = UDim2.fromScale(0.5, 0)
 	brandLabel.AnchorPoint = Vector2.new(0.5, 0)
 	brandLabel.BackgroundTransparency = 1
 	brandLabel.Font = Enum.Font.GothamBold
 	brandLabel.Text = "Rescue Blox"
 	brandLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	brandLabel.TextSize = 30
 	brandLabel.TextScaled = true
 	brandLabel.TextXAlignment = Enum.TextXAlignment.Center
 	brandLabel.Parent = topBar
 
+	local brandConstraint = Instance.new("UITextSizeConstraint")
+	brandConstraint.MaxTextSize = 30
+	brandConstraint.MinTextSize = 18
+	brandConstraint.Parent = brandLabel
+
 	local currencyFrame = Instance.new("Frame")
 	currencyFrame.Name = "Currency"
-	currencyFrame.Size = UDim2.new(0.2, 0, 0.45, 0)
-	currencyFrame.Position = UDim2.new(0.95, 0, 0.5, 0)
+	currencyFrame.Size = UDim2.fromScale(0.2, 0.45)
+	currencyFrame.Position = UDim2.fromScale(0.95, 0.5)
 	currencyFrame.AnchorPoint = Vector2.new(1, 0.5)
 	currencyFrame.BackgroundColor3 = Color3.fromRGB(85, 89, 99)
 	currencyFrame.BorderSizePixel = 0
@@ -162,42 +170,54 @@ local function createShopUI()
 
 	local currencyIcon = Instance.new("TextLabel")
 	currencyIcon.Name = "Icon"
-	currencyIcon.Size = UDim2.new(0.2, 0, 1, 0)
+	currencyIcon.Size = UDim2.fromScale(0.2, 1)
 	currencyIcon.BackgroundTransparency = 1
 	currencyIcon.Font = Enum.Font.GothamBold
 	currencyIcon.Text = "R$"
 	currencyIcon.TextColor3 = Color3.fromRGB(255, 255, 255)
-	currencyIcon.TextSize = 20
 	currencyIcon.TextScaled = true
 	currencyIcon.TextXAlignment = Enum.TextXAlignment.Center
 	currencyIcon.Parent = currencyFrame
 
+	local currencyConstraint = Instance.new("UITextSizeConstraint")
+	currencyConstraint.MaxTextSize = 20
+	currencyConstraint.MinTextSize = 12
+	currencyConstraint.Parent = currencyIcon
+
 	local balanceLabel = Instance.new("TextLabel")
 	balanceLabel.Name = "Balance"
-	balanceLabel.Size = UDim2.new(0.75, 0, 1, 0)
-	balanceLabel.Position = UDim2.new(0.25, 0, 0, 0)
+	balanceLabel.Size = UDim2.fromScale(0.75, 1)
+	balanceLabel.Position = UDim2.fromScale(0.25, 0)
 	balanceLabel.BackgroundTransparency = 1
 	balanceLabel.Font = Enum.Font.GothamMedium
 	balanceLabel.Text = "0"
 	balanceLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	balanceLabel.TextSize = 20
 	balanceLabel.TextScaled = true
 	balanceLabel.TextXAlignment = Enum.TextXAlignment.Left
 	balanceLabel.Parent = currencyFrame
 
+	local balanceConstraint = Instance.new("UITextSizeConstraint")
+	balanceConstraint.MaxTextSize = 20
+	balanceConstraint.MinTextSize = 12
+	balanceConstraint.Parent = balanceLabel
+
 	local closeButton = Instance.new("TextButton")
 	closeButton.Name = "CloseButton"
-	closeButton.Size = UDim2.new(0.045, 0, 0.45, 0)
-	closeButton.Position = UDim2.new(1, 0, 0.5, 0)
+	closeButton.Size = UDim2.fromScale(0.045, 0.45)
+	closeButton.Position = UDim2.fromScale(1, 0.5)
 	closeButton.AnchorPoint = Vector2.new(1, 0.5)
 	closeButton.BackgroundColor3 = Color3.fromRGB(236, 241, 246)
 	closeButton.BorderSizePixel = 0
 	closeButton.Font = Enum.Font.GothamBold
 	closeButton.Text = "X"
 	closeButton.TextColor3 = Color3.fromRGB(80, 88, 103)
-	closeButton.TextSize = 18
 	closeButton.TextScaled = true
 	closeButton.Parent = topBar
+
+	local closeConstraint = Instance.new("UITextSizeConstraint")
+	closeConstraint.MaxTextSize = 18
+	closeConstraint.MinTextSize = 12
+	closeConstraint.Parent = closeButton
 
 	local closeCorner = Instance.new("UICorner")
 	closeCorner.CornerRadius = UDim.new(0.2, 0)
@@ -216,20 +236,20 @@ local function createShopUI()
 	-- สร้าง Content Area (สำหรับใส่ items)
 	local contentFrame = Instance.new("ScrollingFrame")
 	contentFrame.Name = "Content"
-	contentFrame.Size = UDim2.new(0.96, 0, 0.82, 0)
-	contentFrame.Position = UDim2.new(0.02, 0, 0.16, 0)
+	contentFrame.Size = UDim2.fromScale(0.96, 0.82)
+	contentFrame.Position = UDim2.fromScale(0.02, 0.16)
 	contentFrame.BackgroundTransparency = 1
 	contentFrame.BorderSizePixel = 0
 	contentFrame.ScrollBarThickness = 4
-	contentFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-	contentFrame.AutomaticCanvasSize = Enum.AutomaticSize.XY
+	contentFrame.CanvasSize = UDim2.fromScale(0, 0)
+	contentFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	contentFrame.ScrollBarImageColor3 = Color3.fromRGB(190, 195, 205)
 	contentFrame.Parent = shopFrame
 
 	-- สร้าง Grid Layout
 	local gridLayout = Instance.new("UIGridLayout")
-	gridLayout.CellSize = UDim2.new(0.23, 0, 0.9, 0)
-	gridLayout.CellPadding = UDim2.new(0.02, 0, 0.02, 0)
+	gridLayout.CellSize = UDim2.fromScale(0.23, 0.9)
+	gridLayout.CellPadding = UDim2.fromScale(0.02, 0.02)
 	gridLayout.FillDirection = Enum.FillDirection.Horizontal
 	gridLayout.FillDirectionMaxCells = 4
 	gridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
@@ -276,12 +296,11 @@ local function createItemCard(itemData)
 
 	local nameLabel = Instance.new("TextLabel")
 	nameLabel.Name = "ItemName"
-	nameLabel.Size = UDim2.new(1, 0, 0.11, 0)
+	nameLabel.Size = UDim2.fromScale(1, 0.11)
 	nameLabel.BackgroundTransparency = 1
 	nameLabel.Font = Enum.Font.GothamBold
 	nameLabel.Text = formatItemName(itemData.name, itemData.breakName)
 	nameLabel.TextColor3 = Color3.fromRGB(58, 66, 82)
-	nameLabel.TextSize = 20
 	nameLabel.TextScaled = true
 	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
 	nameLabel.TextYAlignment = Enum.TextYAlignment.Top
@@ -289,18 +308,23 @@ local function createItemCard(itemData)
 	nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
 	nameLabel.Parent = card
 
+	local nameConstraint = Instance.new("UITextSizeConstraint")
+	nameConstraint.MaxTextSize = 20
+	nameConstraint.MinTextSize = 12
+	nameConstraint.Parent = nameLabel
+
 	local headerDivider = Instance.new("Frame")
 	headerDivider.Name = "HeaderDivider"
-	headerDivider.Size = UDim2.new(1, 0, 0.003, 0)
-	headerDivider.Position = UDim2.new(0, 0, 0.12, 0)
+	headerDivider.Size = UDim2.fromScale(1, 0.003)
+	headerDivider.Position = UDim2.fromScale(0, 0.12)
 	headerDivider.BackgroundColor3 = Color3.fromRGB(215, 219, 230)
 	headerDivider.BorderSizePixel = 0
 	headerDivider.Parent = card
 
 	local imageLabel = Instance.new("ImageLabel")
 	imageLabel.Name = "Preview"
-	imageLabel.Size = UDim2.new(1, 0, 0.3, 0)
-	imageLabel.Position = UDim2.new(0, 0, 0.15, 0)
+	imageLabel.Size = UDim2.fromScale(1, 0.3)
+	imageLabel.Position = UDim2.fromScale(0, 0.15)
 	imageLabel.BackgroundColor3 = itemData.imageBackgroundColor or Color3.fromRGB(240, 242, 247)
 	imageLabel.BorderSizePixel = 0
 	imageLabel.ScaleType = Enum.ScaleType.Fit
@@ -320,16 +344,21 @@ local function createItemCard(itemData)
 
 	local detailsLabel = Instance.new("TextLabel")
 	detailsLabel.Name = "Details"
-	detailsLabel.Size = UDim2.new(1, 0, 0.14, 0)
-	detailsLabel.Position = UDim2.new(0, 0, 0.49, 0)
+	detailsLabel.Size = UDim2.fromScale(1, 0.14)
+	detailsLabel.Position = UDim2.fromScale(0, 0.49)
 	detailsLabel.BackgroundTransparency = 1
 	detailsLabel.Font = Enum.Font.GothamMedium
 	detailsLabel.TextColor3 = Color3.fromRGB(94, 94, 94)
-	detailsLabel.TextSize = 20
+	detailsLabel.TextScaled = true
 	detailsLabel.TextWrapped = true
 	detailsLabel.TextXAlignment = Enum.TextXAlignment.Left
 	detailsLabel.TextYAlignment = Enum.TextYAlignment.Top
 	detailsLabel.Parent = card
+
+	local detailsConstraint = Instance.new("UITextSizeConstraint")
+	detailsConstraint.MaxTextSize = 14
+	detailsConstraint.MinTextSize = 8
+	detailsConstraint.Parent = detailsLabel
 
 	if itemData.features and #itemData.features > 0 then
 		local lines = {}
@@ -343,30 +372,38 @@ local function createItemCard(itemData)
 
 	local priceLabel = Instance.new("TextLabel")
 	priceLabel.Name = "Price"
-	priceLabel.Size = UDim2.new(1, 0, 0.06, 0)
-	priceLabel.Position = UDim2.new(0, 0, 0.75, 0)
+	priceLabel.Size = UDim2.fromScale(1, 0.06)
+	priceLabel.Position = UDim2.fromScale(0, 0.75)
 	priceLabel.BackgroundTransparency = 1
 	priceLabel.Font = Enum.Font.GothamBold
 	priceLabel.Text = itemData.priceDisplay or ("R$ " .. tostring(itemData.price or 0))
 	priceLabel.TextColor3 = Color3.fromRGB(58, 66, 82)
-	priceLabel.TextSize = 18
 	priceLabel.TextScaled = true
 	priceLabel.TextXAlignment = Enum.TextXAlignment.Center
 	priceLabel.Parent = card
 
+	local priceConstraint = Instance.new("UITextSizeConstraint")
+	priceConstraint.MaxTextSize = 18
+	priceConstraint.MinTextSize = 12
+	priceConstraint.Parent = priceLabel
+
 	local buyButton = Instance.new("TextButton")
 	buyButton.Name = "BuyButton"
-	buyButton.Size = UDim2.new(1, 0, 0.095, 0)
-	buyButton.Position = UDim2.new(0, 0, 0.96, 0)
+	buyButton.Size = UDim2.fromScale(1, 0.095)
+	buyButton.Position = UDim2.fromScale(0, 0.96)
 	buyButton.AnchorPoint = Vector2.new(0, 1)
 	buyButton.BackgroundColor3 = Color3.fromRGB(67, 181, 129)
 	buyButton.BorderSizePixel = 0
 	buyButton.Font = Enum.Font.GothamBold
 	buyButton.Text = "Buy"
 	buyButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-	buyButton.TextSize = 18
 	buyButton.TextScaled = true
 	buyButton.Parent = card
+
+	local buyConstraint = Instance.new("UITextSizeConstraint")
+	buyConstraint.MaxTextSize = 18
+	buyConstraint.MinTextSize = 12
+	buyConstraint.Parent = buyButton
 
 	local buyCorner = Instance.new("UICorner")
 	buyCorner.CornerRadius = UDim.new(0.2, 0)

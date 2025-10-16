@@ -40,12 +40,13 @@ local function createEnergyUI()
 	mainFrame.Parent = energyScreenGui
 
 	local mainCorner = Instance.new("UICorner")
-	mainCorner.CornerRadius = UDim.new(0, 12)
+	mainCorner.CornerRadius = UDim.new(0.15, 0)
 	mainCorner.Parent = mainFrame
 
 	local mainStroke = Instance.new("UIStroke")
 	mainStroke.Color = Color3.fromRGB(70, 75, 85)
 	mainStroke.Thickness = 2
+	mainStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	mainStroke.Parent = mainFrame
 
 	-- เพิ่ม Padding
@@ -59,61 +60,70 @@ local function createEnergyUI()
 	-- สร้างไอคอนแบตเตอรี่
 	local batteryIcon = Instance.new("TextLabel")
 	batteryIcon.Name = "BatteryIcon"
-	batteryIcon.Size = UDim2.new(0.15, 0, 0.6, 0)
-	batteryIcon.Position = UDim2.new(0, 0, 0.2, 0)
+	batteryIcon.Size = UDim2.fromScale(0.15, 0.6)
+	batteryIcon.Position = UDim2.fromScale(0, 0.2)
 	batteryIcon.BackgroundTransparency = 1
 	batteryIcon.Font = Enum.Font.GothamBold
-	batteryIcon.Text = "🔋"
+	batteryIcon.Text = "BAT"
 	batteryIcon.TextColor3 = Color3.fromRGB(255, 255, 255)
-	batteryIcon.TextSize = 28
 	batteryIcon.TextScaled = true
 	batteryIcon.TextXAlignment = Enum.TextXAlignment.Center
 	batteryIcon.TextYAlignment = Enum.TextYAlignment.Center
 	batteryIcon.Parent = mainFrame
 
+	local textSizeConstraint = Instance.new("UITextSizeConstraint")
+	textSizeConstraint.MaxTextSize = 28
+	textSizeConstraint.MinTextSize = 10
+	textSizeConstraint.Parent = batteryIcon
+
 	-- สร้าง Label "Energy"
 	local titleLabel = Instance.new("TextLabel")
 	titleLabel.Name = "Title"
-	titleLabel.Size = UDim2.new(0.7, 0, 0.3, 0)
-	titleLabel.Position = UDim2.new(0.2, 0, 0, 0)
+	titleLabel.Size = UDim2.fromScale(0.7, 0.3)
+	titleLabel.Position = UDim2.fromScale(0.2, 0)
 	titleLabel.BackgroundTransparency = 1
 	titleLabel.Font = Enum.Font.GothamMedium
 	titleLabel.Text = "Energy"
 	titleLabel.TextColor3 = Color3.fromRGB(200, 205, 215)
-	titleLabel.TextSize = 14
 	titleLabel.TextScaled = true
 	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
 	titleLabel.Parent = mainFrame
 
+	local titleSizeConstraint = Instance.new("UITextSizeConstraint")
+	titleSizeConstraint.MaxTextSize = 14
+	titleSizeConstraint.MinTextSize = 8
+	titleSizeConstraint.Parent = titleLabel
+
 	-- สร้าง Background ของ Energy Bar
 	local barBackground = Instance.new("Frame")
 	barBackground.Name = "BarBackground"
-	barBackground.Size = UDim2.new(0.7, 0, 0.4, 0)
-	barBackground.Position = UDim2.new(0.2, 0, 0.5, 0)
+	barBackground.Size = UDim2.fromScale(0.7, 0.4)
+	barBackground.Position = UDim2.fromScale(0.2, 0.5)
 	barBackground.BackgroundColor3 = Color3.fromRGB(25, 28, 33)
 	barBackground.BorderSizePixel = 0
 	barBackground.Parent = mainFrame
 
 	local barBgCorner = Instance.new("UICorner")
-	barBgCorner.CornerRadius = UDim.new(0, 8)
+	barBgCorner.CornerRadius = UDim.new(0.2, 0)
 	barBgCorner.Parent = barBackground
 
 	local barBgStroke = Instance.new("UIStroke")
 	barBgStroke.Color = Color3.fromRGB(60, 65, 75)
 	barBgStroke.Thickness = 1
+	barBgStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	barBgStroke.Parent = barBackground
 
 	-- สร้าง Energy Bar (แถบสีเขียว)
 	energyBar = Instance.new("Frame")
 	energyBar.Name = "EnergyBar"
-	energyBar.Size = UDim2.new(1, -4, 1, -4)
-	energyBar.Position = UDim2.new(0, 2, 0, 2)
-	energyBar.BackgroundColor3 = Color3.fromRGB(76, 209, 55) -- สีเขียว
+	energyBar.Size = UDim2.fromScale(0.98, 0.85)
+	energyBar.Position = UDim2.fromScale(0.01, 0.075)
+	energyBar.BackgroundColor3 = Color3.fromRGB(76, 209, 55)
 	energyBar.BorderSizePixel = 0
 	energyBar.Parent = barBackground
 
 	local barCorner = Instance.new("UICorner")
-	barCorner.CornerRadius = UDim.new(0, 6)
+	barCorner.CornerRadius = UDim.new(0.15, 0)
 	barCorner.Parent = energyBar
 
 	-- เพิ่ม Gradient ให้สวยงาม
@@ -128,16 +138,21 @@ local function createEnergyUI()
 	-- สร้าง Label แสดงเปอร์เซ็นต์
 	energyLabel = Instance.new("TextLabel")
 	energyLabel.Name = "EnergyLabel"
-	energyLabel.Size = UDim2.new(1, 0, 1, 0)
+	energyLabel.Size = UDim2.fromScale(1, 1)
 	energyLabel.BackgroundTransparency = 1
 	energyLabel.Font = Enum.Font.GothamBold
 	energyLabel.Text = "100%"
 	energyLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	energyLabel.TextSize = 14
+	energyLabel.TextScaled = true
 	energyLabel.TextStrokeTransparency = 0.5
 	energyLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 	energyLabel.ZIndex = 2
 	energyLabel.Parent = barBackground
+
+	local labelSizeConstraint = Instance.new("UITextSizeConstraint")
+	labelSizeConstraint.MaxTextSize = 14
+	labelSizeConstraint.MinTextSize = 8
+	labelSizeConstraint.Parent = energyLabel
 
 	print("Energy UI created successfully")
 	return energyScreenGui
@@ -161,7 +176,7 @@ function EnergyUI.setEnergy(energy, max)
 
 	-- อัพเดท Bar
 	if energyBar then
-		energyBar.Size = UDim2.new(scale, -4, 1, -4)
+		energyBar.Size = UDim2.fromScale(scale * 0.98, 0.85)
 
 		-- เปลี่ยนสีตามระดับพลังงาน
 		if percentage > 60 then

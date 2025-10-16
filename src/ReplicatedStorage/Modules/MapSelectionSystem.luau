@@ -45,12 +45,14 @@ local maps = {
 	{
 		name = "City Rescue",
 		image = "rbxasset://textures/ui/GuiImagePlaceholder.png", -- ใส่ Asset ID ของรูป Map
-		description = "Urban rescue mission in the city"
+		description = "Urban rescue mission in the city",
+		isAvailable = true -- Map นี้โหวตได้
 	},
 	{
 		name = "Mountain Rescue",
 		image = "rbxasset://textures/ui/GuiImagePlaceholder.png", -- ใส่ Asset ID ของรูป Map
-		description = "Challenging mountain terrain rescue"
+		description = "Challenging mountain terrain rescue",
+		isAvailable = false -- Map นี้ยังไม่เปิดให้โหวต (Coming Soon)
 	}
 }
 
@@ -171,7 +173,7 @@ local function createMapSelectionUI()
 		mapName.TextStrokeColor3 = Color3.new(0, 0, 0)
 		mapName.Parent = mapFrame
 
-		-- Vote Count
+		-- Vote Count (ซ่อนถ้า Map ไม่ available)
 		local voteCount = Instance.new("TextLabel")
 		voteCount.Name = "VoteCount"
 		voteCount.Size = UDim2.new(0.95, 0, 0.15, 0)
@@ -183,6 +185,7 @@ local function createMapSelectionUI()
 		voteCount.Font = Enum.Font.Gotham
 		voteCount.TextStrokeTransparency = 0
 		voteCount.TextStrokeColor3 = Color3.new(0, 0, 0)
+		voteCount.Visible = map.isAvailable -- ซ่อนถ้า Map ไม่ available
 		voteCount.Parent = mapFrame
 
 		-- Click Button ที่ใหญ่และเห็นชัดขึ้น
@@ -197,6 +200,45 @@ local function createMapSelectionUI()
 
 		-- เก็บ original hover effects ไว้ใช้ใน updateVoteDisplayForAllPlayers แทน
 		-- เพื่อให้สีเปลี่ยนตามสถานะโหวดได้ถูกต้อง
+
+		-- ถ้า Map ไม่ available ให้แสดง "Coming Soon" และปิดการโหวต
+		if not map.isAvailable then
+			-- Overlay สำหรับ Coming Soon
+			local comingSoonOverlay = Instance.new("Frame")
+			comingSoonOverlay.Name = "ComingSoonOverlay"
+			comingSoonOverlay.Size = UDim2.new(1, 0, 1, 0)
+			comingSoonOverlay.Position = UDim2.new(0, 0, 0, 0)
+			comingSoonOverlay.BackgroundColor3 = Color3.new(0, 0, 0)
+			comingSoonOverlay.BackgroundTransparency = 0.7
+			comingSoonOverlay.BorderSizePixel = 0
+			comingSoonOverlay.ZIndex = 10
+			comingSoonOverlay.Parent = mapFrame
+
+			-- Corner สำหรับ Overlay
+			local overlayCorner = Instance.new("UICorner")
+			overlayCorner.CornerRadius = GameConfig.UI.mapSelectioCornerRadius
+			overlayCorner.Parent = comingSoonOverlay
+
+			-- Coming Soon Text
+			local comingSoonText = Instance.new("TextLabel")
+			comingSoonText.Name = "ComingSoonText"
+			comingSoonText.Size = UDim2.new(0.8, 0, 0.3, 0)
+			comingSoonText.Position = UDim2.new(0.1, 0, 0.35, 0)
+			comingSoonText.BackgroundTransparency = 1
+			comingSoonText.Text = "COMING SOON"
+			comingSoonText.TextColor3 = Color3.new(1, 0.8, 0)
+			comingSoonText.TextScaled = true
+			comingSoonText.Font = Enum.Font.GothamBold
+			comingSoonText.TextStrokeTransparency = 0
+			comingSoonText.TextStrokeColor3 = Color3.new(0, 0, 0)
+			comingSoonText.ZIndex = 11
+			comingSoonText.Parent = comingSoonOverlay
+
+			-- ปิดการคลิกโดยสมบูรณ์
+			clickButton.Visible = false -- ซ่อนปุ่มเลย
+			clickButton.Active = false
+			clickButton.AutoButtonColor = false
+		end
 
 		-- เก็บ reference สำหรับการอัปเดต
 		currentVotes[i] = 0
@@ -237,6 +279,12 @@ local function updatePlayerVoteDisplay(player)
 			if voteCount then
 				-- หา votes จาก mapName แทน index
 				local mapData = maps[i]
+
+				-- ข้ามการอัปเดตถ้า Map ไม่ available
+				if not mapData or not mapData.isAvailable then
+					continue
+				end
+
 				local votes = 0
 				if mapData then
 					votes = currentVotes[mapData.name] or 0
@@ -348,21 +396,26 @@ function MapSelectionSystem.startVoting(players)
 						if mapFrame then
 							local clickButton = mapFrame:FindFirstChild("ClickButton")
 							if clickButton then
-								clickButton.MouseButton1Click:Connect(function()
-									MapSelectionSystem.voteForMap(player, mapIndex)
-								end)
+								-- เช็คว่า Map นี้ available หรือไม่
+								local mapData = maps[mapIndex]
+								if mapData and mapData.isAvailable then
+									-- เฉพาะ Map ที่ available ถึงจะโหวตได้
+									clickButton.MouseButton1Click:Connect(function()
+										MapSelectionSystem.voteForMap(player, mapIndex)
+									end)
 
-								-- เพิ่ม hover effects ที่ไม่รบกวนการแสดงผลโหวด
-								clickButton.MouseEnter:Connect(function()
-									if not votingPlayers[player] or votingPlayers[player] ~= mapIndex then
-										mapFrame.BackgroundColor3 = Color3.new(0.2, 0.2, 0.35)
-									end
-								end)
+									-- เพิ่ม hover effects ที่ไม่รบกวนการแสดงผลโหวด
+									clickButton.MouseEnter:Connect(function()
+										if not votingPlayers[player] or votingPlayers[player] ~= mapIndex then
+											mapFrame.BackgroundColor3 = Color3.new(0.2, 0.2, 0.35)
+										end
+									end)
 
-								clickButton.MouseLeave:Connect(function()
-									-- ให้ updatePlayerVoteDisplay จัดการสีให้
-									updatePlayerVoteDisplay(player)
-								end)
+									clickButton.MouseLeave:Connect(function()
+										-- ให้ updatePlayerVoteDisplay จัดการสีให้
+										updatePlayerVoteDisplay(player)
+									end)
+								end
 							end
 						end
 					end
@@ -513,6 +566,13 @@ function MapSelectionSystem.voteForMap(player, mapIndex)
 	end
 
 	local mapData = maps[mapIndex]
+
+	-- ป้องกันการโหวต Map ที่ไม่ available
+	if not mapData.isAvailable then
+		warn("[MapSelectionSystem] Cannot vote for unavailable map:", mapData.name)
+		return
+	end
+
 	local mapName = mapData.name
 
 	print(player.Name .. " voted for " .. mapName)
@@ -527,6 +587,43 @@ end
 -- ฟังก์ชันตรวจสอบสถานะ
 function MapSelectionSystem.isVotingActive()
 	return isVoting
+end
+
+-- ฟังก์ชันหยุดการโหวตและปิด GUI
+function MapSelectionSystem.stopVoting()
+	if not isVoting then
+		print("[MapSelectionSystem] Voting is not active")
+		return
+	end
+
+	isVoting = false
+	print("[MapSelectionSystem] Stopped voting")
+
+	-- ปิด Map Selection GUI
+	local localPlayer = Players.LocalPlayer
+	if localPlayer and localPlayer.PlayerGui then
+		local playerGui = localPlayer.PlayerGui:FindFirstChild("MapSelectionGui")
+		if playerGui then
+			playerGui:Destroy()
+			print("[MapSelectionSystem] Closed Map Selection GUI")
+		end
+	end
+
+	-- Dispatch voting complete event
+	local winningMapIndex = 1 -- Default to first available map
+	local maxVotes = 0
+	for i, mapData in ipairs(maps) do
+		if mapData.isAvailable then
+			local votes = currentVotes[mapData.name] or 0
+			if votes > maxVotes then
+				maxVotes = votes
+				winningMapIndex = i
+			end
+		end
+	end
+
+	local winningMapData = maps[winningMapIndex]
+	dispatchVotingComplete(winningMapIndex, winningMapData)
 end
 
 -- ฟังก์ชันรีเซ็ตระบบ

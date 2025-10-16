@@ -30,54 +30,76 @@ background.Parent = screenGui
 -- สร้าง Popup Container
 local popup = Instance.new("Frame")
 popup.Name = "Popup"
-popup.Size = UDim2.new(0, 400, 0, 250)
-popup.Position = UDim2.new(0.5, -200, 0.5, -125)
+popup.Size = UDim2.fromScale(0.21, 0.23)
+popup.Position = UDim2.fromScale(0.5, 0.5)
+popup.AnchorPoint = Vector2.new(0.5, 0.5)
 popup.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 popup.BackgroundTransparency = 0.5
 popup.BorderSizePixel = 0
 popup.Parent = background
 
 local popupCorner = Instance.new("UICorner")
-popupCorner.CornerRadius = UDim.new(0, 15)
+popupCorner.CornerRadius = UDim.new(0.06, 0)
 popupCorner.Parent = popup
+
+local popupPadding = Instance.new("UIPadding")
+popupPadding.PaddingTop = UDim.new(0.08, 0)
+popupPadding.PaddingBottom = UDim.new(0.08, 0)
+popupPadding.PaddingLeft = UDim.new(0.05, 0)
+popupPadding.PaddingRight = UDim.new(0.05, 0)
+popupPadding.Parent = popup
 
 -- Title
 local title = Instance.new("TextLabel")
 title.Name = "Title"
-title.Size = UDim2.new(1, -40, 0, 50)
-title.Position = UDim2.new(0, 20, 0, 20)
+title.Size = UDim2.fromScale(1, 0.2)
 title.BackgroundTransparency = 1
-title.Text = "⚠️ RESCUE BOT พัง!"
+title.Text = "RESCUE BOT พัง!"
 title.TextColor3 = Color3.fromRGB(255, 100, 100)
-title.TextSize = 28
+title.TextScaled = true
 title.Font = Enum.Font.GothamBold
 title.TextWrapped = true
 title.Parent = popup
 
+local titleConstraint = Instance.new("UITextSizeConstraint")
+titleConstraint.MaxTextSize = 28
+titleConstraint.MinTextSize = 16
+titleConstraint.Parent = title
+
 -- Message
 local message = Instance.new("TextLabel")
 message.Name = "Message"
-message.Size = UDim2.new(1, -40, 0, 60)
-message.Position = UDim2.new(0, 20, 0, 80)
+message.Size = UDim2.fromScale(1, 0.24)
+message.Position = UDim2.fromScale(0, 0.24)
 message.BackgroundTransparency = 1
 message.Text = "รอเพื่อนมาช่วยเหลือ\nหรือรอจนหมดเวลา"
 message.TextColor3 = Color3.fromRGB(255, 255, 255)
-message.TextSize = 18
+message.TextScaled = true
 message.Font = Enum.Font.Gotham
 message.TextWrapped = true
 message.Parent = popup
 
+local messageConstraint = Instance.new("UITextSizeConstraint")
+messageConstraint.MaxTextSize = 18
+messageConstraint.MinTextSize = 12
+messageConstraint.Parent = message
+
 -- Timer Label
 local timerLabel = Instance.new("TextLabel")
 timerLabel.Name = "Timer"
-timerLabel.Size = UDim2.new(1, -40, 0, 80)
-timerLabel.Position = UDim2.new(0, 20, 0, 150)
+timerLabel.Size = UDim2.fromScale(1, 0.32)
+timerLabel.Position = UDim2.fromScale(0, 0.6)
 timerLabel.BackgroundTransparency = 1
 timerLabel.Text = "30"
 timerLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
-timerLabel.TextSize = 60
+timerLabel.TextScaled = true
 timerLabel.Font = Enum.Font.GothamBold
 timerLabel.Parent = popup
+
+local timerConstraint = Instance.new("UITextSizeConstraint")
+timerConstraint.MaxTextSize = 60
+timerConstraint.MinTextSize = 24
+timerConstraint.Parent = timerLabel
 
 local currentTimer: thread? = nil
 

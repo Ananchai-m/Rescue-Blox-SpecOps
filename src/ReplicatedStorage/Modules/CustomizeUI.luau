@@ -291,71 +291,85 @@ local function ensureColorPicker(parent: GuiObject)
 
 	colorPickerFrame = Instance.new("Frame")
 	colorPickerFrame.Name = "ColorPicker"
-	colorPickerFrame.Size = UDim2.new(0, 300, 0, 350)
-	colorPickerFrame.Position = UDim2.new(0, 40, 0.6, 0)
+	colorPickerFrame.Size = UDim2.fromScale(0.2, 0.4)
+	colorPickerFrame.Position = UDim2.fromScale(0.03, 0.95)
 	colorPickerFrame.BackgroundColor3 = Color3.fromRGB(35, 39, 52)
 	colorPickerFrame.BackgroundTransparency = 0.1
 	colorPickerFrame.BorderSizePixel = 0
 	colorPickerFrame.Visible = false
 	colorPickerFrame.Parent = parent
 	colorPickerFrame.ZIndex = 20
-	colorPickerFrame.AnchorPoint = Vector2.new(1, 1)
+	colorPickerFrame.AnchorPoint = Vector2.new(0, 1)
+
+	local colorPickerCorner = Instance.new("UICorner")
+	colorPickerCorner.CornerRadius = UDim.new(0.04, 0)
+	colorPickerCorner.Parent = colorPickerFrame
 
 	local padding = Instance.new("UIPadding")
-	padding.PaddingTop = UDim.new(0, 14)
-	padding.PaddingBottom = UDim.new(0, 14)
-	padding.PaddingLeft = UDim.new(0, 16)
-	padding.PaddingRight = UDim.new(0, 16)
+	padding.PaddingTop = UDim.new(0.04, 0)
+	padding.PaddingBottom = UDim.new(0.04, 0)
+	padding.PaddingLeft = UDim.new(0.05, 0)
+	padding.PaddingRight = UDim.new(0.05, 0)
 	padding.Parent = colorPickerFrame
 
 	local title = Instance.new("TextLabel")
 	title.Name = "Title"
-	title.Size = UDim2.new(1, 0, 0, 24)
+	title.Size = UDim2.fromScale(1, 0.07)
 	title.BackgroundTransparency = 1
 	title.Font = Enum.Font.GothamBold
 	title.Text = "Base Color"
 	title.TextColor3 = Color3.fromRGB(235, 237, 245)
-	title.TextSize = 20
+	title.TextScaled = true
 	title.TextXAlignment = Enum.TextXAlignment.Left
 	title.ZIndex = colorPickerFrame.ZIndex + 1
 	title.Parent = colorPickerFrame
 
+	local titleConstraint = Instance.new("UITextSizeConstraint")
+	titleConstraint.MaxTextSize = 20
+	titleConstraint.MinTextSize = 12
+	titleConstraint.Parent = title
+
 	local partLabel = Instance.new("TextLabel")
 	partLabel.Name = "PartName"
-	partLabel.Size = UDim2.new(1, 0, 0, 18)
-	partLabel.Position = UDim2.new(0, 0, 0, 28)
+	partLabel.Size = UDim2.fromScale(1, 0.05)
+	partLabel.Position = UDim2.fromScale(0, 0.08)
 	partLabel.BackgroundTransparency = 1
 	partLabel.Font = Enum.Font.Gotham
 	partLabel.Text = ""
 	partLabel.TextColor3 = Color3.fromRGB(180, 186, 199)
-	partLabel.TextSize = 14
+	partLabel.TextScaled = true
 	partLabel.TextXAlignment = Enum.TextXAlignment.Left
 	partLabel.ZIndex = colorPickerFrame.ZIndex + 1
 	partLabel.Parent = colorPickerFrame
 	colorPickerPartLabel = partLabel
 
+	local partConstraint = Instance.new("UITextSizeConstraint")
+	partConstraint.MaxTextSize = 14
+	partConstraint.MinTextSize = 10
+	partConstraint.Parent = partLabel
+
 	local paletteContainer = Instance.new("ScrollingFrame")
 	paletteContainer.Name = "Palette"
-	paletteContainer.Size = UDim2.new(1, 0, 1, -120)
-	paletteContainer.Position = UDim2.new(0, 0, 0, 60)
+	paletteContainer.Size = UDim2.fromScale(1, 0.66)
+	paletteContainer.Position = UDim2.fromScale(0, 0.17)
 	paletteContainer.BackgroundTransparency = 1
 	paletteContainer.ZIndex = colorPickerFrame.ZIndex + 1
 	paletteContainer.Parent = colorPickerFrame
 	paletteContainer.ClipsDescendants = true
-	paletteContainer.CanvasSize = UDim2.new(0, 0, 0, 0)
+	paletteContainer.CanvasSize = UDim2.fromScale(0, 0)
 	paletteContainer.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	paletteContainer.ScrollBarThickness = 6
 	paletteContainer.ScrollingDirection = Enum.ScrollingDirection.Y
 	paletteContainer.ScrollBarImageTransparency = 0.3
 
 	local grid = Instance.new("UIGridLayout")
-	grid.CellSize = UDim2.new(0, 48, 0, 48)
-	grid.CellPadding = UDim2.new(0, 8, 0, 8)
+	grid.CellSize = UDim2.fromScale(0.16, 0.13)
+	grid.CellPadding = UDim2.fromScale(0.027, 0.027)
 	grid.SortOrder = Enum.SortOrder.LayoutOrder
 	grid.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	grid.VerticalAlignment = Enum.VerticalAlignment.Top
 	grid.FillDirection = Enum.FillDirection.Horizontal
-	grid.FillDirectionMaxCells = 8
+	grid.FillDirectionMaxCells = 5
 	grid.Parent = paletteContainer
 
 	table.clear(colorPickerButtons)
@@ -394,17 +408,22 @@ local function ensureColorPicker(parent: GuiObject)
 
 	local resetButton = Instance.new("TextButton")
 	resetButton.Name = "ResetButton"
-	resetButton.Size = UDim2.new(1, 0, 0, 40)
-	resetButton.Position = UDim2.new(0, 0, 1, -44)
+	resetButton.Size = UDim2.fromScale(1, 0.11)
+	resetButton.Position = UDim2.fromScale(0, 0.88)
 	resetButton.BackgroundColor3 = Color3.fromRGB(60, 64, 82)
 	resetButton.BackgroundTransparency = 0.15
 	resetButton.BorderSizePixel = 0
 	resetButton.Font = Enum.Font.GothamMedium
 	resetButton.Text = "Reset Colors"
 	resetButton.TextColor3 = Color3.fromRGB(235, 237, 245)
-	resetButton.TextSize = 16
+	resetButton.TextScaled = true
 	resetButton.ZIndex = colorPickerFrame.ZIndex + 1
 	resetButton.Parent = colorPickerFrame
+
+	local resetConstraint = Instance.new("UITextSizeConstraint")
+	resetConstraint.MaxTextSize = 16
+	resetConstraint.MinTextSize = 10
+	resetConstraint.Parent = resetButton
 
 	resetButton.MouseButton1Click:Connect(function()
 		resetPreviewColors()
@@ -1033,7 +1052,7 @@ local function loadEquippedItems()
 
 				-- เพิ่ม InputBegan event สำหรับการลากกลับ
 				itemFrame.InputBegan:Connect(function(input)
-					if input.UserInputType == Enum.UserInputType.MouseButton1 then
+					if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 						beginSlotItemDrag(itemFrame)
 					end
 				end)
@@ -1075,10 +1094,18 @@ local function cancelActiveDrag()
 
 	if ghost then
 		ghost.AnchorPoint = Vector2.new(0, 0)
-		ghost.Position = UDim2.new(0, 0, 0, 0)
-		ghost.Size = UDim2.new(0, SLOT_CELL_SIZE.X, 0, SLOT_CELL_SIZE.Y)
+		ghost.Position = UDim2.fromScale(0, 0)
+		ghost.Size = UDim2.fromScale(0.16, 0.95)
 		ghost.Active = true
 		ghost.Selectable = false
+
+		-- เพิ่ม UIAspectRatioConstraint กลับมา
+		local existingAspect = ghost:FindFirstChildOfClass("UIAspectRatioConstraint")
+		if not existingAspect then
+			local aspectRatio = Instance.new("UIAspectRatioConstraint")
+			aspectRatio.AspectRatio = 1
+			aspectRatio.Parent = ghost
+		end
 
 		local targetParent = originalParent or loadoutBarFrame
 		if targetParent then
@@ -1244,6 +1271,31 @@ end
 local function updateDragState(mousePosition: Vector2)
 	positionGhost(mousePosition)
 
+	-- ตรวจสอบว่ากำลังลากอยู่เหนือ LoadoutBar หรือไม่
+	local isOverLoadoutBar = isPointOverLoadoutBar(mousePosition)
+
+	-- ปรับขนาด ghost frame ตามตำแหน่งที่ลากอยู่
+	if dragContext.ghost and dragContext.config then
+		local camera = workspace.CurrentCamera
+		local viewportSize = camera and camera.ViewportSize or Vector2.new(1920, 1080)
+
+		if isOverLoadoutBar then
+			-- ถ้าลากอยู่เหนือ LoadoutBar ใช้ขนาดของ LoadoutBar
+			local loadoutHeight = viewportSize.Y * 0.09
+			local slotHeight = loadoutHeight * 0.95
+			dragContext.ghost.Size = UDim2.fromOffset(slotHeight, slotHeight)
+		else
+			-- ถ้าลากอยู่เหนือ Inventory ใช้ขนาดของ Inventory slots
+			local panelWidth = viewportSize.X * 0.35
+			local slotSizePixels = Vector2.new(panelWidth * 0.148, panelWidth * 0.148)
+			local paddingPixels = Vector2.new(panelWidth * 0.01, panelWidth * 0.01)
+
+			local baseWidth = (slotSizePixels.X + paddingPixels.X) * dragContext.config.size.X - paddingPixels.X
+			local baseHeight = (slotSizePixels.Y + paddingPixels.Y) * dragContext.config.size.Y - paddingPixels.Y
+			dragContext.ghost.Size = UDim2.fromOffset(baseWidth, baseHeight)
+		end
+	end
+
 	local placement = evaluatePlacement(mousePosition, dragContext.config)
 	dragContext.currentPlacement = placement
 
@@ -1358,7 +1410,7 @@ local function finalizePlacement(placement)
 
 	-- เพิ่ม InputBegan event สำหรับการลากกลับ
 	ghost.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			beginSlotItemDrag(ghost)
 		end
 	end)
@@ -1402,14 +1454,22 @@ local function finishDrag(success: boolean)
 			ghost.LayoutOrder = targetLayoutOrder
 			targetSlot.LayoutOrder = ghostLayoutOrder
 
-			-- รีเซ็ต ghost
+			-- รีเซ็ต ghost ให้เป็นขนาดของ LoadoutBar
 			ghost.AnchorPoint = Vector2.new(0, 0)
-			ghost.Position = UDim2.new(0, 0, 0, 0)
-			ghost.Size = UDim2.new(0, SLOT_CELL_SIZE.X, 0, SLOT_CELL_SIZE.Y)
+			ghost.Position = UDim2.fromScale(0, 0)
+			ghost.Size = UDim2.fromScale(0.16, 0.95)
 			ghost.Active = true
 			ghost.Selectable = false
 			ghost.Parent = loadoutBarFrame
 			setGuiTreeZIndex(ghost, (loadoutBarFrame.ZIndex or 1) + 1)
+
+			-- เพิ่ม UIAspectRatioConstraint กลับมา
+			local existingAspect = ghost:FindFirstChildOfClass("UIAspectRatioConstraint")
+			if not existingAspect then
+				local aspectRatio = Instance.new("UIAspectRatioConstraint")
+				aspectRatio.AspectRatio = 1
+				aspectRatio.Parent = ghost
+			end
 
 			print("[CustomizeUI] Swapped successfully")
 		end
@@ -1466,10 +1526,18 @@ local function finishDrag(success: boolean)
 				print("[CustomizeUI] Item was from LoadoutBar, returning to original position")
 
 				ghost.AnchorPoint = Vector2.new(0, 0)
-				ghost.Position = UDim2.new(0, 0, 0, 0)
-				ghost.Size = UDim2.new(0, SLOT_CELL_SIZE.X, 0, SLOT_CELL_SIZE.Y)
+				ghost.Position = UDim2.fromScale(0, 0)
+				ghost.Size = UDim2.fromScale(0.16, 0.95)
 				ghost.Active = true
 				ghost.Selectable = false
+
+				-- เพิ่ม UIAspectRatioConstraint กลับมา
+				local existingAspect = ghost:FindFirstChildOfClass("UIAspectRatioConstraint")
+				if not existingAspect then
+					local aspectRatio = Instance.new("UIAspectRatioConstraint")
+					aspectRatio.AspectRatio = 1
+					aspectRatio.Parent = ghost
+				end
 
 				if loadoutBarFrame then
 					ghost.Parent = loadoutBarFrame
@@ -1507,8 +1575,11 @@ local function handleDragInputChanged(input)
 		return
 	end
 
-	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
 		updateDragState(UserInputService:GetMouseLocation())
+	elseif input.UserInputType == Enum.UserInputType.Touch then
+		local touchPos = input.Position
+		updateDragState(Vector2.new(touchPos.X, touchPos.Y))
 	end
 end
 
@@ -1517,7 +1588,7 @@ local function handleDragInputEnded(input)
 		return
 	end
 
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		local mousePosition = UserInputService:GetMouseLocation()
 
 		-- อัปเดต placement ล่าสุดก่อนตัดสินใจ
@@ -1536,6 +1607,26 @@ local function handleDragInputEnded(input)
 			finishDrag(true)
 		elseif not dragContext.isFromSlot and dragContext.targetLoadoutSlot and dragContext.targetLoadoutSlot ~= dragContext.ghost then
 			finishDrag(true) -- จะเข้า swap case ใน finishDrag
+		else
+			finishDrag(false)
+		end
+	elseif input.UserInputType == Enum.UserInputType.Touch then
+		local touchPos = input.Position
+		local mousePosition = Vector2.new(touchPos.X, touchPos.Y)
+
+		-- อัปเดต placement ล่าสุดก่อนตัดสินใจ
+		local placement = evaluatePlacement(mousePosition, dragContext.config)
+		dragContext.currentPlacement = placement
+
+		-- อัปเดต targetLoadoutSlot ล่าสุด
+		if not dragContext.isFromSlot then
+			dragContext.targetLoadoutSlot = findLoadoutSlotUnderPoint(mousePosition)
+		end
+
+		if placement and placement.valid and not placement.isOverLoadoutBar then
+			finishDrag(true)
+		elseif not dragContext.isFromSlot and dragContext.targetLoadoutSlot and dragContext.targetLoadoutSlot ~= dragContext.ghost then
+			finishDrag(true)
 		else
 			finishDrag(false)
 		end
@@ -1574,14 +1665,32 @@ local function beginLoadoutDrag(sourceFrame: Frame, config: LoadoutConfig)
 		dragContext.placeholder = nil
 	end
 
+	-- ลบ UIAspectRatioConstraint ถ้ามี (เพราะจะบังคับให้เป็นสี่เหลี่ยมจัตุรัส)
+	local aspectConstraint = sourceFrame:FindFirstChildOfClass("UIAspectRatioConstraint")
+	if aspectConstraint then
+		aspectConstraint:Destroy()
+	end
+
 	sourceFrame.Parent = customizeScreenGui
 	sourceFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 	sourceFrame.Active = false
 	sourceFrame.Selectable = false
 
-	local baseWidth = (SLOT_CELL_SIZE.X + SLOT_CELL_PADDING.X) * config.size.X - SLOT_CELL_PADDING.X
-	local baseHeight = (SLOT_CELL_SIZE.Y + SLOT_CELL_PADDING.Y) * config.size.Y - SLOT_CELL_PADDING.Y
+	-- คำนวณขนาดแบบ dynamic จาก viewport
+	local camera = workspace.CurrentCamera
+	local viewportSize = camera and camera.ViewportSize or Vector2.new(1920, 1080)
+
+	-- คำนวณจาก Inventory Panel size (35% ของหน้าจอ)
+	local panelWidth = viewportSize.X * 0.35
+	local slotSizePixels = Vector2.new(panelWidth * 0.148, panelWidth * 0.148) -- ใช้ aspect ratio 1:1
+	local paddingPixels = Vector2.new(panelWidth * 0.01, panelWidth * 0.01)
+
+	local baseWidth = (slotSizePixels.X + paddingPixels.X) * config.size.X - paddingPixels.X
+	local baseHeight = (slotSizePixels.Y + paddingPixels.Y) * config.size.Y - paddingPixels.Y
 	sourceFrame.Size = UDim2.fromOffset(baseWidth, baseHeight)
+
+	print(string.format("[CustomizeUI] Dragging %s from LoadoutBar - Size: %dx%d slots, Pixels: %.1fx%.1f",
+		config.id, config.size.X, config.size.Y, baseWidth, baseHeight))
 
 	setGuiTreeZIndex(sourceFrame, 200)
 
@@ -1653,10 +1762,32 @@ beginSlotItemDrag = function(sourceFrame: Frame)
 		end
 	end
 
+	-- ลบ UIAspectRatioConstraint ถ้ามี (เพราะจะบังคับให้เป็นสี่เหลี่ยมจัตุรัส)
+	local aspectConstraint = sourceFrame:FindFirstChildOfClass("UIAspectRatioConstraint")
+	if aspectConstraint then
+		aspectConstraint:Destroy()
+	end
+
 	sourceFrame.Parent = customizeScreenGui
 	sourceFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 	sourceFrame.Active = false
 	sourceFrame.Selectable = false
+
+	-- คำนวณขนาดแบบ dynamic จาก viewport สำหรับ multi-slot items
+	local camera = workspace.CurrentCamera
+	local viewportSize = camera and camera.ViewportSize or Vector2.new(1920, 1080)
+
+	-- คำนวณจาก Inventory Panel size (35% ของหน้าจอ)
+	local panelWidth = viewportSize.X * 0.35
+	local slotSizePixels = Vector2.new(panelWidth * 0.148, panelWidth * 0.148) -- ใช้ aspect ratio 1:1
+	local paddingPixels = Vector2.new(panelWidth * 0.01, panelWidth * 0.01)
+
+	local baseWidth = (slotSizePixels.X + paddingPixels.X) * config.size.X - paddingPixels.X
+	local baseHeight = (slotSizePixels.Y + paddingPixels.Y) * config.size.Y - paddingPixels.Y
+	sourceFrame.Size = UDim2.fromOffset(baseWidth, baseHeight)
+
+	print(string.format("[CustomizeUI] Dragging %s - Size: %dx%d slots, Pixels: %.1fx%.1f",
+		config.id, config.size.X, config.size.Y, baseWidth, baseHeight))
 
 	setGuiTreeZIndex(sourceFrame, 200)
 
@@ -1676,7 +1807,7 @@ createLoadoutSlot = function(config: LoadoutConfig, index: number): Frame
 
 	local itemFrame = Instance.new("Frame")
 	itemFrame.Name = string.format("LoadoutSlot%d", index)
-	itemFrame.Size = UDim2.new(0, SLOT_CELL_SIZE.X, 0, SLOT_CELL_SIZE.Y)
+	itemFrame.Size = UDim2.fromScale(0.16, 0.95)
 	itemFrame.BackgroundColor3 = Color3.fromRGB(58, 62, 77)
 	itemFrame.BackgroundTransparency = 0.08
 	itemFrame.BorderSizePixel = 0
@@ -1686,11 +1817,19 @@ createLoadoutSlot = function(config: LoadoutConfig, index: number): Frame
 	itemFrame.Parent = loadoutBarFrame
 	itemFrame:SetAttribute("ItemId", config.id)
 
+	local aspectRatio = Instance.new("UIAspectRatioConstraint")
+	aspectRatio.AspectRatio = 1
+	aspectRatio.Parent = itemFrame
+
+	local itemCorner = Instance.new("UICorner")
+	itemCorner.CornerRadius = UDim.new(0.1, 0)
+	itemCorner.Parent = itemFrame
+
 
 	local itemLabel = Instance.new("TextLabel")
 	itemLabel.Name = "Label"
-	itemLabel.Size = UDim2.new(1, -8, 1, -8)
-	itemLabel.Position = UDim2.new(0.5, 0, 0.5, 0)
+	itemLabel.Size = UDim2.fromScale(0.9, 0.9)
+	itemLabel.Position = UDim2.fromScale(0.5, 0.5)
 	itemLabel.AnchorPoint = Vector2.new(0.5, 0.5)
 	itemLabel.BackgroundTransparency = 1
 	itemLabel.Font = Enum.Font.GothamMedium
@@ -1701,9 +1840,14 @@ createLoadoutSlot = function(config: LoadoutConfig, index: number): Frame
 	itemLabel.ZIndex = itemFrame.ZIndex + 1
 	itemLabel.Parent = itemFrame
 
+	local labelConstraint = Instance.new("UITextSizeConstraint")
+	labelConstraint.MaxTextSize = 14
+	labelConstraint.MinTextSize = 8
+	labelConstraint.Parent = itemLabel
+
 	local slotConfig = config
 	itemFrame.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			beginLoadoutDrag(itemFrame, slotConfig)
 		end
 	end)
@@ -1791,8 +1935,8 @@ local function createCustomizeUI()
 	-- Inventory panel (right side)
 	local inventoryPanel = Instance.new("Frame")
 	inventoryPanel.Name = "InventoryPanel"
-	inventoryPanel.Size = UDim2.new(0, 520, 0, 620)
-	inventoryPanel.Position = UDim2.new(1, -60, 0.08, 0)
+	inventoryPanel.Size = UDim2.fromScale(0.35, 0.75)
+	inventoryPanel.Position = UDim2.fromScale(0.98, 0.08)
 	inventoryPanel.AnchorPoint = Vector2.new(1, 0)
 	inventoryPanel.BackgroundColor3 = Color3.fromRGB(47, 51, 64)
 	inventoryPanel.BackgroundTransparency = 0.8
@@ -1800,46 +1944,65 @@ local function createCustomizeUI()
 	inventoryPanel.ZIndex = 5
 	inventoryPanel.Parent = contentFrame
 
+	-- เพิ่ม UICorner สำหรับ rounded corners
+	local inventoryCorner = Instance.new("UICorner")
+	inventoryCorner.CornerRadius = UDim.new(0.02, 0)
+	inventoryCorner.Parent = inventoryPanel
+
 	local inventoryHeader = Instance.new("Frame")
 	inventoryHeader.Name = "InventoryHeader"
-	inventoryHeader.Size = UDim2.new(1, 0, 0, 48)
+	inventoryHeader.Size = UDim2.fromScale(1, 0.075)
 	inventoryHeader.BackgroundColor3 = Color3.fromRGB(30, 32, 42)
 	inventoryHeader.BackgroundTransparency = 0.2
 	inventoryHeader.BorderSizePixel = 0
 	inventoryHeader.ZIndex = inventoryPanel.ZIndex + 1
 	inventoryHeader.Parent = inventoryPanel
 
+	local headerPadding = Instance.new("UIPadding")
+	headerPadding.PaddingLeft = UDim.new(0.03, 0)
+	headerPadding.PaddingRight = UDim.new(0.03, 0)
+	headerPadding.Parent = inventoryHeader
+
 	local inventoryLabel = Instance.new("TextLabel")
 	inventoryLabel.Name = "Title"
-	inventoryLabel.Size = UDim2.new(1, -20, 1, 0)
-	inventoryLabel.Position = UDim2.new(0, 12, 0, 0)
+	inventoryLabel.Size = UDim2.fromScale(0.95, 1)
 	inventoryLabel.BackgroundTransparency = 1
 	inventoryLabel.Font = Enum.Font.GothamBold
 	inventoryLabel.Text = "Inventory"
 	inventoryLabel.TextColor3 = Color3.fromRGB(235, 237, 245)
-	inventoryLabel.TextSize = 28
+	inventoryLabel.TextScaled = true
 	inventoryLabel.TextXAlignment = Enum.TextXAlignment.Left
 	inventoryLabel.ZIndex = inventoryHeader.ZIndex + 1
 	inventoryLabel.Parent = inventoryHeader
 
+	local inventoryConstraint = Instance.new("UITextSizeConstraint")
+	inventoryConstraint.MaxTextSize = 28
+	inventoryConstraint.MinTextSize = 16
+	inventoryConstraint.Parent = inventoryLabel
+
 	local slotsContainer = Instance.new("Frame")
 	slotsContainer.Name = "Slots"
-	slotsContainer.Size = UDim2.new(1, -28, 1, -60)
-	slotsContainer.Position = UDim2.new(0.5, 0, 0, 60)
+	slotsContainer.Size = UDim2.fromScale(0.95, 0.9)
+	slotsContainer.Position = UDim2.fromScale(0.5, 0.095)
 	slotsContainer.AnchorPoint = Vector2.new(0.5, 0)
 	slotsContainer.BackgroundTransparency = 1
 	slotsContainer.ZIndex = inventoryPanel.ZIndex + 1
 	slotsContainer.Parent = inventoryPanel
 
 	local slotsLayout = Instance.new("UIGridLayout")
-	slotsLayout.CellSize = UDim2.new(0, SLOT_CELL_SIZE.X, 0, SLOT_CELL_SIZE.Y)
-	slotsLayout.CellPadding = UDim2.new(0, SLOT_CELL_PADDING.X, 0, SLOT_CELL_PADDING.Y)
+	slotsLayout.CellSize = UDim2.fromScale(0.148, 0.125)
+	slotsLayout.CellPadding = UDim2.fromScale(0.01, 0.01)
 	slotsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	slotsLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 	slotsLayout.StartCorner = Enum.StartCorner.TopLeft
 	slotsLayout.FillDirectionMaxCells = SLOT_COLUMNS
 	slotsLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	slotsLayout.Parent = slotsContainer
+
+	-- เพิ่ม UIAspectRatioConstraint สำหรับ slots
+	local slotsAspect = Instance.new("UIAspectRatioConstraint")
+	slotsAspect.AspectRatio = 1.05
+	slotsAspect.Parent = slotsContainer
 
 	for index = 1, SLOT_COLUMNS * SLOT_ROWS do
 		local gridColumn = (index - 1) % SLOT_COLUMNS
@@ -1906,8 +2069,8 @@ local function createCustomizeUI()
 	-- Loadout bar at bottom
 	local loadoutBar = Instance.new("Frame")
 	loadoutBar.Name = "LoadoutBar"
-	loadoutBar.Size = UDim2.new(0, 520, 0, 120)
-	loadoutBar.Position = UDim2.new(0.5, 0, 0.95, 0)
+	loadoutBar.Size = UDim2.fromScale(0.35, 0.09)
+	loadoutBar.Position = UDim2.fromScale(0.5, 0.96)
 	loadoutBar.AnchorPoint = Vector2.new(0.5, 1)
 	loadoutBar.BackgroundColor3 = Color3.fromRGB(46, 50, 64)
 	loadoutBar.BackgroundTransparency = 1
@@ -1917,17 +2080,17 @@ local function createCustomizeUI()
 	loadoutBarFrame = loadoutBar
 
 	local loadoutPadding = Instance.new("UIPadding")
-	loadoutPadding.PaddingLeft = UDim.new(0, 20)
-	loadoutPadding.PaddingRight = UDim.new(0, 20)
-	loadoutPadding.PaddingTop = UDim.new(0, 15)
-	loadoutPadding.PaddingBottom = UDim.new(0, 15)
+	loadoutPadding.PaddingLeft = UDim.new(0.04, 0)
+	loadoutPadding.PaddingRight = UDim.new(0.04, 0)
+	loadoutPadding.PaddingTop = UDim.new(0.12, 0)
+	loadoutPadding.PaddingBottom = UDim.new(0.12, 0)
 	loadoutPadding.Parent = loadoutBar
 
 	local loadoutLayout = Instance.new("UIListLayout")
 	loadoutLayout.FillDirection = Enum.FillDirection.Horizontal
 	loadoutLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	loadoutLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-	loadoutLayout.Padding = UDim.new(0, 16)
+	loadoutLayout.Padding = UDim.new(0.03, 0)
 	loadoutLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	loadoutLayout.Parent = loadoutBar
 
@@ -2101,7 +2264,7 @@ local function setupCameraRotation()
 	inputBeganConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		if gameProcessed then return end
 
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			local hitPart = pickPreviewPartFromMouse()
 			if hitPart then
 				selectPreviewPart(hitPart)
@@ -2109,7 +2272,12 @@ local function setupCameraRotation()
 				clearPreviewSelection()
 			end
 			isDragging = true
-			lastMousePosition = UserInputService:GetMouseLocation()
+			if input.UserInputType == Enum.UserInputType.MouseButton1 then
+				lastMousePosition = UserInputService:GetMouseLocation()
+			else
+				local touchPos = input.Position
+				lastMousePosition = Vector2.new(touchPos.X, touchPos.Y)
+			end
 		elseif input.KeyCode == Enum.KeyCode.Q then
 			toggleArms()
 		end
@@ -2117,7 +2285,7 @@ local function setupCameraRotation()
 
 	-- Input Ended - หยุด drag
 	inputEndedConnection = UserInputService.InputEnded:Connect(function(input, gameProcessed)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			isDragging = false
 			lastMousePosition = nil
 		end
@@ -2126,20 +2294,26 @@ local function setupCameraRotation()
 	-- Input Changed - หมุน bot
 	inputChangedConnection = UserInputService.InputChanged:Connect(function(input, gameProcessed)
 		-- จัดการหมุน bot
-		if isDragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-			local currentMousePosition = UserInputService:GetMouseLocation()
+		if isDragging then
+			local currentMousePosition = nil
 
-			if lastMousePosition then
+			if input.UserInputType == Enum.UserInputType.MouseMovement then
+				currentMousePosition = UserInputService:GetMouseLocation()
+			elseif input.UserInputType == Enum.UserInputType.Touch then
+				local touchPos = input.Position
+				currentMousePosition = Vector2.new(touchPos.X, touchPos.Y)
+			end
+
+			if currentMousePosition and lastMousePosition then
 				local delta = currentMousePosition - lastMousePosition
 				local rotationSpeed = 0.3
 
-				-- หมุนรอบแกน Y (เฉพาะ X delta) - เปลี่ยนเครื่องหมายเป็น + เพื่อให้ลากขวาหมุนขวา
+				-- หมุนรอบแกน Y (เฉพาะ X delta)
 				currentRotationAngle = currentRotationAngle + (delta.X * rotationSpeed)
 
 				updateBotRotation()
+				lastMousePosition = currentMousePosition
 			end
-
-			lastMousePosition = currentMousePosition
 		end
 	end)
 
