@@ -4,8 +4,10 @@
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -27,10 +29,15 @@ local isReviving = false
 local holdStartTime = 0
 local progressFill: Frame? = nil
 local heartbeatConnection: RBXScriptConnection? = nil
+-- ลบ mobileReviveButton เพราะให้กดที่ billboard ได้เลย
 
 -- RemoteEvents
 local remoteEvents = ReplicatedStorage:WaitForChild("RescueBotRemotes")
 local reviveRemote = remoteEvents:WaitForChild("ReviveTeammate") :: RemoteEvent
+
+-- Forward declarations
+local startRevive: () -> ()
+local stopRevive: (boolean) -> ()
 
 -- สร้าง Billboard UI บนหุ่นยนต์ที่พัง
 local function createBillboard(downedBot: Model): (BillboardGui?, Frame?)
@@ -53,15 +60,32 @@ local function createBillboard(downedBot: Model): (BillboardGui?, Frame?)
 	billboard.Adornee = downedBot.PrimaryPart
 	billboard.Parent = downedBot
 
-	-- Main frame
-	local mainFrame = Instance.new("Frame")
+	-- Main frame (ทำเป็น TextButton เพื่อให้กดได้)
+	local mainFrame = Instance.new("TextButton")
 	mainFrame.Name = "MainFrame"
 	mainFrame.Size = UDim2.new(1, 0, 1, 0)
 	mainFrame.Position = UDim2.new(0, 0, 0, 0)
 	mainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 	mainFrame.BackgroundTransparency = 0.2
 	mainFrame.BorderSizePixel = 0
+	mainFrame.Text = ""
+	mainFrame.AutoButtonColor = false
 	mainFrame.Parent = billboard
+
+	-- เชื่อมการกดปุ่มกับการ Revive
+	mainFrame.MouseButton1Down:Connect(function()
+		if nearestDownedBot == downedBot and not isReviving then
+			startRevive()
+		end
+	end)
+
+	mainFrame.MouseButton1Up:Connect(function()
+		if isReviving then
+			local elapsed = tick() - holdStartTime
+			local completed = elapsed >= HOLD_DURATION
+			stopRevive(completed)
+		end
+	end)
 
 	-- Corner
 	local corner = Instance.new("UICorner")
@@ -129,7 +153,7 @@ end
 
 -- หา RescueBot ที่พังที่ใกล้ที่สุด
 local function findNearestDownedBot(): Model?
-	local myBot = workspace:FindFirstChild(player.Name .. "_Rescue")
+	local myBot = Workspace:FindFirstChild(player.Name .. "_Rescue")
 	if not myBot or not myBot.PrimaryPart then
 		return nil
 	end
@@ -138,7 +162,7 @@ local function findNearestDownedBot(): Model?
 	local nearest: Model? = nil
 	local nearestDistance = REVIVE_DISTANCE
 
-	for _, child in workspace:GetChildren() do
+	for _, child in Workspace:GetChildren() do
 		if child:IsA("Model") and child.Name:match("_Rescue$") then
 			-- ไม่ใช่ตัวเอง
 			if child ~= myBot then
@@ -159,7 +183,7 @@ local function findNearestDownedBot(): Model?
 end
 
 -- เริ่มช่วยเหลือ
-local function startRevive()
+function startRevive()
 	if isReviving or not nearestDownedBot then
 		return
 	end
@@ -176,7 +200,7 @@ local function startRevive()
 end
 
 -- หยุดช่วยเหลือ
-local function stopRevive(completed: boolean)
+function stopRevive(completed: boolean)
 	if not isReviving then
 		return
 	end
@@ -204,30 +228,30 @@ local function stopRevive(completed: boolean)
 	holdStartTime = 0
 end
 
--- Input handling
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then return end
-
-	if input.KeyCode == REVIVE_KEY then
+local function handleReviveAction(_: string, inputState: Enum.UserInputState, inputObject: InputObject?)
+	if inputState == Enum.UserInputState.Begin then
 		if nearestDownedBot and not isReviving then
 			startRevive()
 		end
-	end
-end)
-
-UserInputService.InputEnded:Connect(function(input, gameProcessed)
-	if input.KeyCode == REVIVE_KEY then
+	elseif inputState == Enum.UserInputState.End or inputState == Enum.UserInputState.Cancel then
 		if isReviving then
 			local elapsed = tick() - holdStartTime
 			local completed = elapsed >= HOLD_DURATION
 			stopRevive(completed)
 		end
 	end
-end)
+
+	return Enum.ContextActionResult.Pass
+end
+
+ContextActionService:BindAction("ReviveTeammateAction", handleReviveAction, false, REVIVE_KEY)
+ContextActionService:SetTitle("ReviveTeammateAction", "Revive")
+
+-- ลบฟังก์ชัน updateReviveButton() และ listeners เพราะให้กดที่ billboard ได้เลย
 
 -- Main loop - update UI และตรวจสอบระยะทาง
 heartbeatConnection = RunService.Heartbeat:Connect(function()
-	local myBot = workspace:FindFirstChild(player.Name .. "_Rescue")
+	local myBot = Workspace:FindFirstChild(player.Name .. "_Rescue")
 	if not myBot or not myBot.PrimaryPart then
 		-- ไม่มี RescueBot ลบ UI
 		if billboardGui then

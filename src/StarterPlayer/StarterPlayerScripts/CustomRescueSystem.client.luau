@@ -2,9 +2,11 @@
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -29,11 +31,16 @@ local progressBar = nil
 local lastDebugTime = 0
 local lastCharacterWarning = 0
 local systemInitialized = false
+-- ลบ mobileRescueButton เพราะให้กดที่ billboard ได้เลย
 
 -- RemoteEvents
 local remoteEvents = ReplicatedStorage:WaitForChild("RescueBotRemotes")
 local rescueRemote = remoteEvents:WaitForChild("VictimRescue")
 local victimsReadyRemote = remoteEvents:WaitForChild("VictimsReady")
+
+-- Forward declarations
+local startRescue: () -> ()
+local stopRescue: () -> ()
 
 -- Function to create billboard UI on victim
 local function createVictimBillboard(victim)
@@ -58,15 +65,30 @@ local function createVictimBillboard(victim)
 	victimBillboard.Adornee = rootPart
 	victimBillboard.Parent = victim
 
-	-- Main frame
-	local mainFrame = Instance.new("Frame")
+	-- Main frame (ทำเป็น TextButton เพื่อให้กดได้)
+	local mainFrame = Instance.new("TextButton")
 	mainFrame.Name = "MainFrame"
 	mainFrame.Size = UDim2.new(1, 0, 1, 0)
 	mainFrame.Position = UDim2.new(0, 0, 0, 0)
 	mainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 	mainFrame.BackgroundTransparency = 0.2
 	mainFrame.BorderSizePixel = 0
+	mainFrame.Text = ""
+	mainFrame.AutoButtonColor = false
 	mainFrame.Parent = victimBillboard
+
+	-- เชื่อมการกดปุ่มกับการ Rescue
+	mainFrame.MouseButton1Down:Connect(function()
+		if nearestVictim == victim and not isRescuing then
+			startRescue()
+		end
+	end)
+
+	mainFrame.MouseButton1Up:Connect(function()
+		if isRescuing then
+			stopRescue()
+		end
+	end)
 
 	-- Corner
 	local corner = Instance.new("UICorner")
@@ -130,7 +152,7 @@ local function findNearestVictim()
 
 	-- Find player's rescue bot (_Rescue only)
 	local playerVehicle = nil
-	for _, model in ipairs(workspace:GetChildren()) do
+	for _, model in ipairs(Workspace:GetChildren()) do
 		if model:IsA("Model") and model.Name == player.Name .. "_Rescue" then
 			if model.PrimaryPart then
 				playerVehicle = model
@@ -158,7 +180,7 @@ local function findNearestVictim()
 	local nearestDistance = math.huge
 
 	-- Check VictimFolders
-	local victimFolder = workspace:FindFirstChild("VictimFolders")
+	local victimFolder = Workspace:FindFirstChild("VictimFolders")
 	if not victimFolder then
 		-- VictimFolders ไม่อยู่ (อาจจะเกมจบแล้ว) ไม่ต้องแสดง warning
 		return nil
@@ -195,7 +217,7 @@ local function findNearestVictim()
 end
 
 -- Function to stop rescue
-local function stopRescue()
+function stopRescue()
 	isRescuing = false
 
 	if rescueConnection then
@@ -294,7 +316,7 @@ local function updateRescueUI()
 		-- Check what position source we're using
 		local positionSource = "unknown"
 		local playerVehicle = nil
-		for _, model in ipairs(workspace:GetChildren()) do
+	for _, model in ipairs(Workspace:GetChildren()) do
 			if model:IsA("Model") and (model.Name == player.Name .. "_RescueCompanion" or model.Name == player.Name .. "_Rescue") then
 				if model.PrimaryPart then
 					playerVehicle = model
@@ -351,7 +373,7 @@ local function updateRescueUI()
 end
 
 -- Function to start rescue
-local function startRescue()
+function startRescue()
 	if not nearestVictim or isRescuing then return end
 
 	isRescuing = true
@@ -396,25 +418,21 @@ local function startRescue()
 end
 
 -- Handle input
-local function onKeyPressed(key, gameProcessed)
-	if gameProcessed then return end
-
-	if key.KeyCode == RESCUE_KEY then
+local function handleRescueAction(_: string, inputState: Enum.UserInputState, inputObject: InputObject?)
+	if inputState == Enum.UserInputState.Begin then
 		if nearestVictim and not isRescuing then
 			startRescue()
 		end
-	end
-end
-
-local function onKeyReleased(key, gameProcessed)
-	if gameProcessed then return end
-
-	if key.KeyCode == RESCUE_KEY then
+	elseif inputState == Enum.UserInputState.End or inputState == Enum.UserInputState.Cancel then
 		if isRescuing then
 			stopRescue()
 		end
 	end
+
+	return Enum.ContextActionResult.Pass
 end
+
+-- ลบฟังก์ชัน updateRescueButton() เพราะให้กดที่ billboard ได้เลย
 
 -- Initialize system
 local function initializeSystem()
@@ -426,7 +444,7 @@ local function initializeSystem()
 	print("[CustomRescueSystem] Starting initialization...")
 
 	-- Check if VictimFolders exists
-	local victimFolder = workspace:FindFirstChild("VictimFolders")
+	local victimFolder = Workspace:FindFirstChild("VictimFolders")
 	if victimFolder then
 		local victimCount = 0
 		for _, child in ipairs(victimFolder:GetChildren()) do
@@ -448,11 +466,10 @@ local function initializeSystem()
 	distanceConnection = RunService.Heartbeat:Connect(updateRescueUI)
 	print("[CustomRescueSystem] Distance checking connection established")
 
-	-- Connect input (only once)
+	-- Bind rescue action (keyboard only - no button)
 	if not systemInitialized then
-		UserInputService.InputBegan:Connect(onKeyPressed)
-		UserInputService.InputEnded:Connect(onKeyReleased)
-		print("[CustomRescueSystem] Input connections established")
+		ContextActionService:BindAction("RescueVictimAction", handleRescueAction, false, RESCUE_KEY)
+		print("[CustomRescueSystem] Rescue action bound to keyboard (E key)")
 	end
 
 	systemInitialized = true
@@ -463,7 +480,7 @@ end
 local function waitForVictimsAndInitialize()
 	if player.Character then
 		-- Check if VictimFolders already exists
-		local victimFolder = workspace:FindFirstChild("VictimFolders")
+		local victimFolder = Workspace:FindFirstChild("VictimFolders")
 		if victimFolder and #victimFolder:GetChildren() > 0 then
 			print("[CustomRescueSystem] VictimFolders already exists, initializing immediately")
 			task.wait(1)
@@ -520,5 +537,7 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 		stopRescue()
 	end
 end)
+
+-- ลบ listener สำหรับ MobileControlsGui เพราะไม่ต้องมีปุ่มแยกอีกต่อไป
 
 print("[CustomRescueSystem] Loaded for", player.Name)

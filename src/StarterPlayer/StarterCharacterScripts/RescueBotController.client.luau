@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -46,6 +47,13 @@ local FlipGui = ScreenGuis:WaitForChild("FlipBillboardGui")
 local isSummaryActive = false
 local summaryPrevMouseBehavior: Enum.MouseBehavior? = nil
 local summaryPrevMouseIconEnabled: boolean? = nil
+
+-- ContextButtonFrame variables
+local ContextButtonFrame: ScreenGui? = nil
+local contextButtonFrameCreated = false
+
+
+
 
 local function hideTopbarIcons()
 	ShopUI.setButtonVisible(false)
@@ -189,6 +197,613 @@ local function startCompanionFollow()
 	end
 end
 
+local function isControllingRescueVehicle(): boolean
+	return VehicleController.getOriginalRescueModel() ~= nil
+end
+
+local function toggleDrillMode()
+	if not isControllingRescueVehicle() then
+		return
+	end
+
+	isDrillModeActive = not isDrillModeActive
+	toggleDrillModeRemote:FireServer(isDrillModeActive)
+
+	if isDrillModeActive then
+		print("[Drill Mode] Activated - Ready to drill!")
+	else
+		print("[Drill Mode] Deactivated")
+	end
+end
+
+local function toggleCameraTracking()
+	print("DEBUG: Camera tracking toggled via mobile/keyboard control")
+	CameraSystem.toggleCameraTracking()
+end
+
+local function toggleThermalVision()
+	local equippedItems = CustomizeService.getEquippedItems()
+	local hasThermometerCamera = false
+
+	if equippedItems then
+		for _, equippedItem in ipairs(equippedItems) do
+			if equippedItem.id == "ThermometerCamera" then
+				hasThermometerCamera = true
+				break
+			end
+		end
+	end
+
+	if hasThermometerCamera then
+		CameraSystem.toggleThermalVision()
+	else
+		print("[CameraSystem] Thermometer Camera required to use thermal vision!")
+	end
+end
+
+local function setCameraZoomPreset(factor: number)
+	if CameraSystem.isInZoomMode() then
+		CameraSystem.setCameraZoomFactor(factor)
+	end
+end
+
+local function adjustCameraZoom(step: number)
+	if CameraSystem.isInZoomMode() and step ~= 0 then
+		CameraSystem.adjustCameraZoom(step)
+	end
+end
+
+local function tryFlipVehicle()
+	VehicleController.handleSpaceKey()
+end
+
+local function getDrillTargetPosition(screenPoint: Vector2?): Vector3?
+	if screenPoint then
+		local ray = camera:ViewportPointToRay(screenPoint.X, screenPoint.Y)
+		local params = RaycastParams.new()
+		params.FilterDescendantsInstances = {player.Character}
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		local result = Workspace:Raycast(ray.Origin, ray.Direction * 200, params)
+		if result then
+			return result.Position
+		end
+		return ray.Origin + ray.Direction * 200
+	end
+
+	local mouse = player:GetMouse()
+	if mouse and mouse.Hit then
+		return mouse.Hit.Position
+	end
+
+	local origin = camera.CFrame.Position
+	local direction = camera.CFrame.LookVector * 200
+
+	local params = RaycastParams.new()
+	params.FilterDescendantsInstances = {player.Character}
+	params.FilterType = Enum.RaycastFilterType.Exclude
+
+	local result = Workspace:Raycast(origin, direction, params)
+	if result then
+		return result.Position
+	end
+
+	return origin + direction
+end
+
+local function activateHydraulicOrDrill(screenPoint: Vector2?)
+	if not isControllingRescueVehicle() then
+		return
+	end
+
+	local clickPosition = getDrillTargetPosition(screenPoint)
+	if not clickPosition then
+		return
+	end
+
+	local canDrill = false
+	local currentTargetAngle = nil
+	local isDrillArmEquipped = false
+	local currentRescueModel = VehicleController.getOriginalRescueModel() or rescueModel
+	if currentRescueModel then
+		isDrillArmEquipped = currentRescueModel:GetAttribute("DrillArmEquipped") == true
+
+		if isDrillArmEquipped then
+			local drillArm = currentRescueModel:FindFirstChild("DrillArm")
+			if drillArm then
+				local tube2 = drillArm:FindFirstChild("Tube2")
+				if tube2 then
+					local hingeConstraint = tube2:FindFirstChild("HingeConstraint")
+					if hingeConstraint then
+						currentTargetAngle = hingeConstraint.TargetAngle
+						if hingeConstraint.TargetAngle == 0 then
+							canDrill = true
+						end
+					end
+				end
+			end
+		end
+	end
+
+	if not isDrillArmEquipped then
+		warn("[Drill Mode] Cannot drill! DrillArm is not equipped. Please equip DrillArm first.")
+	elseif canDrill and isDrillModeActive then
+		print("[Drill Mode] Drilling allowed - TargetAngle = 0")
+		local didDrill = DrillSystem.handleDrillingClick(clickPosition)
+		if not didDrill then
+			hydraulicRemote:FireServer()
+			print("Screen tapped - Hydraulic arm activated!")
+		end
+	elseif isDrillModeActive and not canDrill then
+		warn("[Drill Mode] Cannot drill! DrillArm must be at TargetAngle = 0. Current:", currentTargetAngle)
+		print("Press Q to move DrillArm to position 0")
+	else
+		print("[Drill Mode] Drill mode is off - press Q to activate")
+	end
+end
+
+local vehicleActionDefs = {
+	{
+		name = "ToggleDrillModeAction",
+		title = "Drill",
+		position = UDim2.new(0.741, 0, 0.479, 0),
+		size = UDim2.new(0, 50, 0, 50),
+		joystick = "RightJoystick",
+		angleDeg = 90,
+		radiusMargin = 28,
+		textSize = 18,
+		keys = {Enum.KeyCode.Q},
+		handler = function(_, inputState)
+			if inputState == Enum.UserInputState.Begin then
+				toggleDrillMode()
+			end
+			return Enum.ContextActionResult.Pass
+		end,
+	},
+	{
+		name = "ToggleCameraTrackingAction",
+		title = "Track",
+		position = UDim2.new(0.118, 0, 0.48, 0),
+		size = UDim2.new(0, 45, 0, 45),
+		joystick = "RightJoystick",
+		angleDeg = 180,
+		radiusMargin = 4,
+		textSize = 16,
+		keys = {Enum.KeyCode.Z},
+		handler = function(_, inputState)
+			if inputState == Enum.UserInputState.Begin then
+				toggleCameraTracking()
+			end
+			return Enum.ContextActionResult.Pass
+		end,
+	},
+	{
+		name = "ToggleThermalVisionAction",
+		title = "Therm",
+		position = UDim2.new(0, 0, 0.681, 0),
+		size = UDim2.new(0, 45, 0, 45),
+		joystick = "RightJoystick",
+		angleDeg = 270,
+		radiusMargin = 3,
+		textSize = 16,
+		keys = {Enum.KeyCode.X},
+		handler = function(_, inputState)
+			if inputState == Enum.UserInputState.Begin then
+				toggleThermalVision()
+			end
+			return Enum.ContextActionResult.Pass
+		end,
+	},
+	{
+		name = "FlipRescueVehicleAction",
+		title = "Flip",
+		position = UDim2.new(0.683, 0, 0.683, 0),
+		size = UDim2.new(0, 50, 0, 50),
+		joystick = "RightJoystick",
+		angleDeg = 0,
+		radiusMargin = 4,
+		textSize = 18,
+		keys = {Enum.KeyCode.Space},
+		handler = function(_, inputState)
+			if inputState == Enum.UserInputState.Begin then
+				tryFlipVehicle()
+			end
+			return Enum.ContextActionResult.Pass
+		end,
+	},
+	{
+		name = "CameraZoomInAction",
+		title = "+",
+		position = UDim2.new(0.224, 0, 0.478, 0),
+		size = UDim2.new(0, 40, 0, 40),
+		joystick = "LeftJoystick",
+		angleDeg = 90,
+		radiusMargin = 22,
+		textSize = 24,
+		keys = {Enum.KeyCode.Equals},
+		handler = function(_, inputState)
+			if inputState == Enum.UserInputState.Begin then
+				adjustCameraZoom(1)
+			end
+			return Enum.ContextActionResult.Pass
+		end,
+	},
+	{
+		name = "CameraZoomOutAction",
+		title = "-",
+		position = UDim2.new(0, 0, 0.478, 0),
+		size = UDim2.new(0, 40, 0, 40),
+		joystick = "LeftJoystick",
+		angleDeg = 270,
+		radiusMargin = 2,
+		textSize = 24,
+		keys = {Enum.KeyCode.Minus},
+		handler = function(_, inputState)
+			if inputState == Enum.UserInputState.Begin then
+				adjustCameraZoom(-1)
+			end
+			return Enum.ContextActionResult.Pass
+		end,
+	},
+}
+
+local vehicleActionsBound = false
+local vehicleTouchButtons: {[string]: TextButton} = {}
+local joystickListeners: {[string]: {RBXScriptConnection}} = {}
+local controlsGuiChildConnection: RBXScriptConnection? = nil
+
+local function clearJoystickListeners()
+	for _, connections in pairs(joystickListeners) do
+		for _, connection in ipairs(connections) do
+			connection:Disconnect()
+		end
+	end
+	joystickListeners = {}
+end
+
+-- Forward declaration
+local hideVehicleActionButtons: () -> ()
+
+local function unbindVehicleActions()
+	if not vehicleActionsBound then
+		return
+	end
+
+	for _, def in ipairs(vehicleActionDefs) do
+		ContextActionService:UnbindAction(def.name)
+	end
+	ContextActionService:UnbindAction("CameraZoomPreset1")
+	ContextActionService:UnbindAction("CameraZoomPreset2")
+	ContextActionService:UnbindAction("CameraZoomPreset5")
+
+	vehicleActionsBound = false
+	hideVehicleActionButtons()
+	clearJoystickListeners()
+end
+
+local function createVehicleTouchButton(def): TextButton
+	local button = Instance.new("TextButton")
+	button.Name = def.name .. "Touch"
+	button.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+	button.BackgroundTransparency = 0.2
+	button.BorderSizePixel = 0
+	button.AutoButtonColor = true
+	button.Text = def.title
+	button.TextScaled = false
+	button.TextSize = def.textSize or 18
+	button.TextWrapped = true
+	button.Font = Enum.Font.GothamBold
+	button.TextColor3 = Color3.new(1, 1, 1)
+	button.AnchorPoint = Vector2.new(0.5, 0.5)
+	button.ZIndex = 60
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(1, 0)
+	corner.Parent = button
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(255, 255, 255)
+	stroke.Thickness = 2
+	stroke.Transparency = 0.4
+	stroke.Parent = button
+
+	button.Activated:Connect(function()
+		def.handler(def.name, Enum.UserInputState.Begin)
+	end)
+
+	-- ใส่ปุ่มใน ContextButtonFrame
+	if ContextButtonFrame then
+		button.Parent = ContextButtonFrame:FindFirstChild("MainFrame")
+	else
+		warn("[ContextButtonFrame] Frame not found, button not parented")
+	end
+	return button
+end
+
+local function ensureVehicleActionButton(def): TextButton?
+	local button = vehicleTouchButtons[def.name]
+	if button and button.Parent ~= nil then
+		return button
+	end
+
+	button = createVehicleTouchButton(def)
+	vehicleTouchButtons[def.name] = button
+	return button
+end
+
+function hideVehicleActionButtons()
+	for _, button in pairs(vehicleTouchButtons) do
+		button.Visible = false
+		button.Active = false
+		button.Parent = nil
+	end
+	clearJoystickListeners()
+	if controlsGuiChildConnection then
+		controlsGuiChildConnection:Disconnect()
+		controlsGuiChildConnection = nil
+	end
+end
+
+local function layoutVehicleTouchButtons()
+	-- ใช้ ContextButtonFrame แทน MobileControlsGui
+	if not ContextButtonFrame or not ContextButtonFrame.Enabled then
+		hideVehicleActionButtons()
+		return
+	end
+
+	local mainFrame = ContextButtonFrame:FindFirstChild("MainFrame")
+	if not mainFrame then
+		hideVehicleActionButtons()
+		return
+	end
+
+	-- หา MobileControlsGui และ Joystick frames สำหรับคำนวณตำแหน่ง
+	local controlsGui = playerGui:FindFirstChild("MobileControlsGui") :: ScreenGui?
+	if not controlsGui then
+		hideVehicleActionButtons()
+		return
+	end
+
+	local leftJoystick = controlsGui:FindFirstChild("LeftJoystick")
+	local rightJoystick = controlsGui:FindFirstChild("RightJoystick")
+
+	-- คำนวณตำแหน่งปุ่มรอบ Joystick
+	for _, def in ipairs(vehicleActionDefs) do
+		local button = vehicleTouchButtons[def.name]
+		if not button then
+			button = ensureVehicleActionButton(def)
+		end
+
+		local joystickFrame = nil
+		if def.joystick == "LeftJoystick" then
+			joystickFrame = leftJoystick
+		elseif def.joystick == "RightJoystick" then
+			joystickFrame = rightJoystick
+		end
+
+		if button and joystickFrame and joystickFrame:IsA("Frame") then
+			-- คำนวณตำแหน่งจาก angle และ radius
+			local angleRad = math.rad(def.angleDeg)
+
+			-- แปลง pixels เป็น scale ทั้ง X และ Y โดยอ้างอิงขนาด joystick จริง
+			local screenWidth = controlsGui.AbsoluteSize.X
+			local screenHeight = controlsGui.AbsoluteSize.Y
+			local joystickSize = joystickFrame.AbsoluteSize
+			local radiusMargin = def.radiusMargin or def.radiusOffset or 12
+
+			local baseRadiusX = joystickSize.X * 0.5
+			local baseRadiusY = joystickSize.Y * 0.5
+
+			local radiusScaleX = (baseRadiusX + radiusMargin) / math.max(screenWidth, 1)
+			local radiusScaleY = (baseRadiusY + radiusMargin) / math.max(screenHeight, 1)
+
+			-- คำนวณ offset จากจุดกลาง joystick
+			local offsetX = math.cos(angleRad) * radiusScaleX
+			local offsetY = -math.sin(angleRad) * radiusScaleY -- ลบเพราะ Y axis กลับกัน
+
+			-- ขยับเพิ่มครึ่งหนึ่งของขนาดปุ่มเพื่อไม่ให้ทับกับ joystick
+			local angleNorm = ((def.angleDeg % 360) + 360) % 360
+			local halfWidthScale = (def.size.X.Scale * 0.5)
+				+ (def.size.X.Offset / math.max(screenWidth, 1)) * 0.5
+			local halfHeightScale = (def.size.Y.Scale * 0.5)
+				+ (def.size.Y.Offset / math.max(screenHeight, 1)) * 0.5
+
+			if angleNorm == 0 then
+				offsetX += halfWidthScale
+			elseif angleNorm == 180 then
+				offsetX -= halfWidthScale
+			elseif angleNorm == 90 then
+				offsetY -= halfHeightScale
+			elseif angleNorm == 270 then
+				offsetY += halfHeightScale
+			end
+
+			-- ตำแหน่งสุดท้าย = ตำแหน่ง joystick + offset
+			local finalPosition = UDim2.new(
+				joystickFrame.Position.X.Scale + offsetX,
+				joystickFrame.Position.X.Offset,
+				joystickFrame.Position.Y.Scale + offsetY,
+				joystickFrame.Position.Y.Offset
+			)
+
+			button.Position = finalPosition
+			button.Size = def.size
+			button.Visible = true
+			button.Active = true
+			button.Parent = mainFrame
+
+			print(def.title, "ContextActionButton position", finalPosition)
+		end
+	end
+end
+
+
+
+local function setupJoystickListeners()
+	local controlsGui = playerGui:FindFirstChild("MobileControlsGui")
+	if not controlsGui then
+		return
+	end
+
+	if controlsGuiChildConnection then
+		controlsGuiChildConnection:Disconnect()
+	end
+
+	controlsGuiChildConnection = controlsGui.ChildAdded:Connect(function(descendant)
+		if descendant:IsA("Frame") and (descendant.Name == "LeftJoystick" or descendant.Name == "RightJoystick") then
+			setupJoystickListeners()
+		end
+	end)
+
+	local function attach(name: string)
+		local frame = controlsGui:FindFirstChild(name)
+		if not frame or not frame:IsA("Frame") then
+			return
+		end
+
+		if joystickListeners[name] then
+			for _, connection in ipairs(joystickListeners[name]) do
+				connection:Disconnect()
+			end
+		end
+
+		joystickListeners[name] = {
+			frame:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+				layoutVehicleTouchButtons()
+			end),
+			frame:GetPropertyChangedSignal("AbsolutePosition"):Connect(function()
+				layoutVehicleTouchButtons()
+			end),
+		}
+	end
+
+	attach("LeftJoystick")
+	attach("RightJoystick")
+
+	task.defer(layoutVehicleTouchButtons)
+end
+local function bindVehicleActions()
+	-- Bind ปุ่มหลัก (จะแสดงบน mobile)
+	for _, def in ipairs(vehicleActionDefs) do
+		ContextActionService:BindAction(def.name, def.handler, true, table.unpack(def.keys))
+		ContextActionService:SetTitle(def.name, def.title)
+		ContextActionService:SetPosition(def.name, def.position)
+	end
+
+	-- Bind zoom presets (ไม่แสดงปุ่ม - keyboard only)
+	ContextActionService:BindAction("CameraZoomPreset1", function(_, inputState)
+		if inputState == Enum.UserInputState.Begin then
+			setCameraZoomPreset(1)
+		end
+		return Enum.ContextActionResult.Pass
+	end, false, Enum.KeyCode.One)
+
+	ContextActionService:BindAction("CameraZoomPreset2", function(_, inputState)
+		if inputState == Enum.UserInputState.Begin then
+			setCameraZoomPreset(2)
+		end
+		return Enum.ContextActionResult.Pass
+	end, false, Enum.KeyCode.Two)
+
+	ContextActionService:BindAction("CameraZoomPreset5", function(_, inputState)
+		if inputState == Enum.UserInputState.Begin then
+			setCameraZoomPreset(5)
+		end
+		return Enum.ContextActionResult.Pass
+	end, false, Enum.KeyCode.Five)
+
+	vehicleActionsBound = true
+end
+
+local function createContextButtonFrame()
+	if contextButtonFrameCreated then
+		return ContextButtonFrame
+	end
+
+	-- สร้าง ScreenGui สำหรับ ContextButtonFrame
+	ContextButtonFrame = Instance.new("ScreenGui")
+	ContextButtonFrame.Name = "ContextButtonFrame"
+	ContextButtonFrame.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	ContextButtonFrame.Parent = playerGui
+
+	-- สร้าง Frame หลัก
+	local mainFrame = Instance.new("Frame")
+	mainFrame.Name = "MainFrame"
+	mainFrame.Position = UDim2.new(0, 0, 0, 0)
+	mainFrame.Size = UDim2.new(1, 0, 1, 0)
+	mainFrame.BackgroundTransparency = 1
+	mainFrame.Parent = ContextButtonFrame
+
+	contextButtonFrameCreated = true
+	print("[ContextButtonFrame] Created successfully")
+	return ContextButtonFrame
+end
+
+
+
+
+local function updateVehicleActionButtons()
+	local shouldShow = UserInputService.TouchEnabled and isControllingRescueVehicle()
+
+	-- Bind actions ถ้ายังไม่ได้ bind
+	if not vehicleActionsBound then
+		bindVehicleActions()
+	end
+
+
+
+	if not shouldShow then
+		-- ซ่อนปุ่มทั้งหมด
+		for _, def in ipairs(vehicleActionDefs) do
+			ContextActionService:SetTitle(def.name, "")
+			ContextActionService:SetPosition(def.name, UDim2.new(2, 0, 2, 0)) -- ย้ายออกนอกจอ
+		end
+		ContextActionService:SetTitle("CameraZoomPreset1", "")
+		ContextActionService:SetTitle("CameraZoomPreset2", "")
+		ContextActionService:SetTitle("CameraZoomPreset5", "")
+
+
+		-- ซ่อน ContextButtonFrame
+		if ContextButtonFrame then
+			ContextButtonFrame.Enabled = false
+		end
+		return
+	end
+
+	-- สร้าง ContextButtonFrame ถ้ายังไม่มี
+	createContextButtonFrame()
+
+	-- แสดง ContextButtonFrame
+	if ContextButtonFrame then
+		ContextButtonFrame.Enabled = true
+	end
+
+
+
+
+	-- จัดวางปุ่มใน ContextButtonFrame
+	layoutVehicleTouchButtons()
+
+	-- ซ่อน ContextActionService titles เพราะใช้ปุ่มใน ContextButtonFrame แทน
+	for _, def in ipairs(vehicleActionDefs) do
+		ContextActionService:SetTitle(def.name, "")
+	end
+
+	-- ซ่อน zoom preset titles เสมอ
+	ContextActionService:SetTitle("CameraZoomPreset1", "")
+	ContextActionService:SetTitle("CameraZoomPreset2", "")
+	ContextActionService:SetTitle("CameraZoomPreset5", "")
+end
+
+-- เรียก update เพื่อ bind actions ตอนเริ่มต้น
+updateVehicleActionButtons()
+
+-- อัปเดตตำแหน่งปุ่มเมื่อ MobileControlsGui ถูกเพิ่ม
+playerGui.ChildAdded:Connect(function(child)
+	if child.Name == "MobileControlsGui" then
+		task.defer(updateVehicleActionButtons)
+	end
+end)
+
 local function stopCompanionFollow()
 	VehicleController.setThrottleInput(0)
 	VehicleController.setSteerInput(0)
@@ -326,13 +941,13 @@ local function stopRescueMode()
 
 	-- ส่งคำสั่งหยุดไปยัง server
 	stopControlEvent:FireServer()
-	
+
 	-- คืน camera กลับเป็นปกติ (เฉพาะเมื่อมีการปรับ)
 	if character and character:FindFirstChild("Humanoid") then
 		camera.CameraType = Enum.CameraType.Custom
 		camera.CameraSubject = character.Humanoid
 	end
-	
+
 	-- ล้างตัวแปรใน VehicleController
 	VehicleController.clearVehicleParts()
 
@@ -341,13 +956,14 @@ local function stopRescueMode()
 		flipSurfaceGui:Destroy()
 		flipSurfaceGui = nil
 	end
-	
+
 	-- เริ่มระบบตามผู้เล่นอีกครั้ง (ไม่ลบ companion)
 	if rescueModel then
 		startCompanionFollow()
 	end
-	
+
 	print("Stopped controlling RescueCompanion")
+	updateVehicleActionButtons()
 end
 
 -- ฟังก์ชันล้าง GUI ต่างๆ ของเกม
@@ -401,13 +1017,13 @@ character:WaitForChild("Humanoid").Seated:Connect(function(active, seatPart)
 
 	local attachmentFL = primary:FindFirstChild("AttachmentFL")
 	local attachmentFR = primary:FindFirstChild("AttachmentFR")
-	if not (attachmentFL and attachmentFR) then 
+	if not (attachmentFL and attachmentFR) then
 		warn("RescueBot: Missing AttachmentFL or AttachmentFR on PrimaryPart")
-		return 
+		return
 	end
-	if not (attachmentFL:IsA("Attachment") and attachmentFR:IsA("Attachment")) then 
+	if not (attachmentFL:IsA("Attachment") and attachmentFR:IsA("Attachment")) then
 		warn("RescueBot: AttachmentFL or AttachmentFR are not Attachment objects")
-		return 
+		return
 	end
 
 	-- เก็บค่าตั้งต้นของ Orientation ไว้ (สำคัญ!)
@@ -419,23 +1035,23 @@ character:WaitForChild("Humanoid").Seated:Connect(function(active, seatPart)
 	local wheelBR = vehicleModel:FindFirstChild("Wheel_BR")
 	local wheelFL = vehicleModel:FindFirstChild("Wheel_FL")
 	local wheelFR = vehicleModel:FindFirstChild("Wheel_FR")
-	
-	if not (wheelBL and wheelBR) then 
+
+	if not (wheelBL and wheelBR) then
 		warn("RescueBot: Missing Wheel_BL or Wheel_BR")
-		return 
+		return
 	end
-	if not (wheelBL:IsA("BasePart") and wheelBR:IsA("BasePart")) then 
+	if not (wheelBL:IsA("BasePart") and wheelBR:IsA("BasePart")) then
 		warn("RescueBot: Wheel_BL or Wheel_BR are not BasePart objects")
-		return 
+		return
 	end
 
 	local cylindricalBL = wheelBL:FindFirstChildOfClass("CylindricalConstraint")
 	local cylindricalBR = wheelBR:FindFirstChildOfClass("CylindricalConstraint")
-	if not (cylindricalBL and cylindricalBR) then 
+	if not (cylindricalBL and cylindricalBR) then
 		warn("RescueBot: Missing CylindricalConstraints on rear wheels")
-		return 
+		return
 	end
-	
+
 	-- ล้อหน้า (ถ้ามี) สำหรับ 4WD
 	local cylindricalFL, cylindricalFR
 	if wheelFL and wheelFL:IsA("BasePart") then
@@ -468,18 +1084,18 @@ character:WaitForChild("Humanoid").Seated:Connect(function(active, seatPart)
 
 	-- คำนวณความเร็วเชิงมุมสูงสุดจาก MaxSpeed และรัศมีล้อที่ขับ (BR)
 	local radius = wheelBR.Size.Y * 0.5
-	if radius <= 0 then 
+	if radius <= 0 then
 		warn("RescueBot: Wheel radius is too small:", radius)
-		return 
+		return
 	end
-	
+
 	local maxSpeed = seatPart.MaxSpeed or 20 -- รักษาความเร็วปกติ
 	local maxAngularVelocity = maxSpeed / radius
 
 	if not maxAngularVelocity or maxAngularVelocity ~= maxAngularVelocity or maxAngularVelocity <= 0 then
 		maxAngularVelocity = 30 -- รักษาความเร็วปกติ
 	end
-	
+
 	print("RescueBot initialized - MaxSpeed:", maxSpeed, "Radius:", radius, "MaxAngularVelocity:", maxAngularVelocity)
 
 	-- ===== Steering (เลี้ยว) =====
@@ -529,7 +1145,7 @@ character:WaitForChild("Humanoid").Seated:Connect(function(active, seatPart)
 		-- ปรับแรงบิดตามคันเร่ง (รักษาค่าพื้นฐาน)
 		local baseTorque = seatPart.Torque or 5000 -- รักษาค่าเดิม
 		local minTorque = 2000 -- รักษาค่าเดิม
-		
+
 		-- เพิ่มแรงบิดเมื่อขึ้นเนิน (ตรวจจากความชันของรถ)
 		local vehicleOrientation = primary.CFrame.LookVector
 		local slopeBonus = 1
@@ -543,7 +1159,7 @@ character:WaitForChild("Humanoid").Seated:Connect(function(active, seatPart)
 				slopeBonus = 10 + (vehicleOrientation.Y * 16)
 			end
 		end
-		
+
 		local torque = math.max(math.abs(throttle) * baseTorque * slopeBonus, minTorque)
 		local targetAV = dir * maxAngularVelocity
 
@@ -592,15 +1208,16 @@ local function spawnRescueCompanion()
 		stopCompanionFollow()
 		rescueModel:Destroy()
 		rescueModel = nil
+		updateVehicleActionButtons()
 	end
-	
+
 	-- หา RescueCompanion ใน ReplicatedStorage และ Clone มา
 	local rescueTemplate = ReplicatedStorage:FindFirstChild("RescueCompanion")
 	if not rescueTemplate or not rescueTemplate:IsA("Model") then
 		warn("RescueCompanion not found in ReplicatedStorage")
 		return
 	end
-	
+
 	-- ส่งคำสั่ง spawn ไปยัง server
 	if character and character.PrimaryPart then
 		local playerPosition = character.PrimaryPart.Position
@@ -619,7 +1236,7 @@ local function spawnRescueCompanion()
 		local maxAttempts = 20
 		while attempts < maxAttempts do
 			wait(0.1)
-			rescueModel = workspace:FindFirstChild(player.Name .. "_RescueCompanion")
+			rescueModel = Workspace:FindFirstChild(player.Name .. "_RescueCompanion")
 			if rescueModel then
 				print("DEBUG: Found companion model after", attempts + 1, "attempts")
 				break
@@ -629,6 +1246,7 @@ local function spawnRescueCompanion()
 
 		if not rescueModel then
 			warn("DEBUG: Failed to find companion model after", maxAttempts, "attempts")
+			updateVehicleActionButtons()
 			return
 		end
 	end
@@ -640,34 +1258,36 @@ local function spawnRescueCompanion()
 	else
 		print("DEBUG: In rescue mode, not starting follow")
 	end
+	updateVehicleActionButtons()
 	return rescueModel
 end
 
-function startRescueMode(useCamera)
+local function startRescueMode(useCamera)
 	if isRescueMode then return end
-	
+
 	-- Spawn companion ถ้าไม่มี
 	if not rescueModel then
 		spawnRescueCompanion()
 		if not rescueModel then return end
 	end
-	
+
 	isRescueMode = true
-	
+	updateVehicleActionButtons()
+
 	-- หยุดการตามผู้เล่น
 	stopCompanionFollow()
-	
+
 	-- ผู้เล่นยังคงเคลื่อนไหวได้ปกติ แต่ควบคุม companion จากระยะไกล
 	if character and character.PrimaryPart and character:FindFirstChild("Humanoid") then
 		print("Controlling RescueCompanion remotely")
-		
+
 		-- ใช้กล้องแบบปกติ (ไม่ปรับ camera)
 		-- if useCamera then
 		--	camera.CameraType = Enum.CameraType.Scriptable
 		-- end
-		
+
 		print("Player can move freely while controlling RescueCompanion")
-		
+
 		-- Setup การควบคุมแบบ manual
 		local success = VehicleController.setupVehicle(rescueModel)
 		if success then
@@ -691,7 +1311,7 @@ function startRescueMode(useCamera)
 				--	camera.CFrame = CFrame.lookAt(cameraPosition.Position, lookAtPosition)
 				-- end
 			end)
-			
+
 			local cameraText = useCamera and "with camera following" or "(no camera change)"
 			print("Now controlling RescueCompanion manually " .. cameraText)
 		else
@@ -750,7 +1370,7 @@ local function exitGame()
 	print("Player exited game - Can touch Simu again")
 end
 
-function startOriginalRescueMode()
+local function startOriginalRescueMode()
 	local originalRescueModel = VehicleController.getOriginalRescueModel()
 	print("startOriginalRescueMode called, originalRescueModel exists:", originalRescueModel ~= nil)
 
@@ -786,10 +1406,11 @@ function startOriginalRescueMode()
 	wait(0.5)
 
 	-- หา model ที่ server สร้าง
-	local originalRescueModel = workspace:FindFirstChild(player.Name .. "_Rescue")
+	local originalRescueModel = Workspace:FindFirstChild(player.Name .. "_Rescue")
 	if not originalRescueModel then
 		warn("Original Rescue Model not found after server spawn")
 		isInOriginalRescueMode = false
+		updateVehicleActionButtons()
 		return
 	end
 
@@ -800,6 +1421,7 @@ function startOriginalRescueMode()
 
 	-- เก็บใน VehicleController
 	VehicleController.setOriginalRescueModel(originalRescueModel)
+	updateVehicleActionButtons()
 
 	if character and character.PrimaryPart and character:FindFirstChild("Humanoid") then
 		print("Setting up original Rescue Mode...")
@@ -858,14 +1480,14 @@ function startOriginalRescueMode()
 			-- กล้องจะตามรถอัตโนมัติผ่าน CameraSubject แล้ว ไม่ต้องปรับ manual
 		end)
 
-		isInOriginalRescueMode = true
-		print("Original Rescue Mode started successfully!")
+	isInOriginalRescueMode = true
+	print("Original Rescue Mode started successfully!")
 	else
 		print("Character not ready")
 	end
 end
 
-function stopOriginalRescueMode()
+local function stopOriginalRescueMode()
 	if connections.originalRescueControl then
 		connections.originalRescueControl:Disconnect()
 		connections.originalRescueControl = nil
@@ -905,6 +1527,7 @@ function stopOriginalRescueMode()
 	-- ล้างตัวแปรใน VehicleController
 	VehicleController.clearVehicleParts()
 	VehicleController.setOriginalRescueModel(nil)
+	updateVehicleActionButtons()
 
 	-- ลบ flip GUI
 	if flipSurfaceGui then
@@ -933,6 +1556,7 @@ function stopOriginalRescueMode()
 		print("Deleting existing RescueCompanion and spawning new one...")
 		rescueModel:Destroy()
 		rescueModel = nil
+		updateVehicleActionButtons()
 	end
 	spawnRescueCompanion() -- spawn ใหม่เสมอ
 end
@@ -941,117 +1565,11 @@ end
 connections.inputBegan = UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
 
-	-- Toggle Drill Mode with Q key
-	if input.KeyCode == Enum.KeyCode.Q then
-		if isRescueMode or VehicleController.getOriginalRescueModel() then
-			isDrillModeActive = not isDrillModeActive
-
-			-- ส่งคำสั่งไป Server ให้ปรับ Tube2 และ Head HingeConstraint
-			toggleDrillModeRemote:FireServer(isDrillModeActive)
-
-			if isDrillModeActive then
-				print("[Drill Mode] Activated - Ready to drill!")
-			else
-				print("[Drill Mode] Deactivated")
-			end
-		end
-	end
-
-	-- Camera tracking controls
-	if input.KeyCode == Enum.KeyCode.Z then
-		-- กด Z เพื่อ toggle camera tracking (ติดตาม Camera part ของ rescue vehicle)
-		print("DEBUG: Z key pressed, calling CameraSystem.toggleCameraTracking()")
-		CameraSystem.toggleCameraTracking()
-	elseif input.KeyCode == Enum.KeyCode.X then
-		-- กด X เพื่อ toggle thermal vision (ต้องมี Thermometer Camera)
-		-- เช็คว่ามี Thermometer Camera equip อยู่หรือไม่
-		local equippedItems = CustomizeService.getEquippedItems()
-		local hasThermometerCamera = false
-
-		if equippedItems then
-			for _, equippedItem in ipairs(equippedItems) do
-				if equippedItem.id == "ThermometerCamera" then
-					hasThermometerCamera = true
-					break
-				end
-			end
-		end
-
-		if hasThermometerCamera then
-			CameraSystem.toggleThermalVision()
-		else
-			print("[CameraSystem] Thermometer Camera required to use thermal vision!")
-		end
-	end
-
-	if CameraSystem.isInZoomMode() then
-		if input.KeyCode == Enum.KeyCode.One then
-			CameraSystem.setCameraZoomFactor(1)
-		elseif input.KeyCode == Enum.KeyCode.Two then
-			CameraSystem.setCameraZoomFactor(2)
-		elseif input.KeyCode == Enum.KeyCode.Five then
-			CameraSystem.setCameraZoomFactor(5)
-		end
-	end
-
 	-- คลิกที่ไหนบนหน้าจอก็ได้เพื่อเจาะหรือเปิดใช้ hydraulic arm (เฉพาะใน rescue mode)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 and (isRescueMode or VehicleController.getOriginalRescueModel()) then
-		-- ได้ตำแหน่งของเมาส์
-		local mouse = player:GetMouse()
-		local clickPosition = mouse.Hit.Position
-
-		-- เช็คว่า DrillArm equipped และ อยู่ที่ TargetAngle = 0 หรือไม่
-		local canDrill = false
-		local currentTargetAngle = nil
-		local isDrillArmEquipped = false
-		local currentRescueModel = VehicleController.getOriginalRescueModel() or rescueModel
-		if currentRescueModel then
-			-- เช็คว่า DrillArm ถูก equipped หรือไม่
-			isDrillArmEquipped = currentRescueModel:GetAttribute("DrillArmEquipped") == true
-
-			if not isDrillArmEquipped then
-				print("[Drill Mode] DrillArm not equipped!")
-			else
-				local drillArm = currentRescueModel:FindFirstChild("DrillArm")
-				if drillArm then
-					-- เช็ค Tube2.HingeConstraint TargetAngle
-					local tube2 = drillArm:FindFirstChild("Tube2")
-					if tube2 then
-						local hingeConstraint = tube2:FindFirstChild("HingeConstraint")
-						if hingeConstraint then
-							currentTargetAngle = hingeConstraint.TargetAngle
-							print("[Click Debug] TargetAngle:", currentTargetAngle, "isDrillModeActive:", isDrillModeActive)
-							if hingeConstraint.TargetAngle == 0 then
-								canDrill = true
-							end
-						end
-					end
-				end
-			end
-		end
-
-		-- ลองเจาะได้ก็ต่อเมื่อ DrillArm equipped, TargetAngle = 0 และเปิด Drill Mode
-		if not isDrillArmEquipped then
-			-- ไม่มี DrillArm equipped
-			warn("[Drill Mode] Cannot drill! DrillArm is not equipped. Please equip DrillArm first.")
-		elseif canDrill and isDrillModeActive then
-			print("[Drill Mode] Drilling allowed - TargetAngle = 0")
-			local didDrill = DrillSystem.handleDrillingClick(clickPosition)
-
-			if not didDrill then
-				-- ถ้าไม่มี part ให้เจาะ ก็เปิด hydraulic arm ธรรมดา
-				hydraulicRemote:FireServer()
-				print("Screen clicked - Hydraulic arm activated!")
-			end
-		elseif isDrillModeActive and not canDrill then
-			-- ถ้าเปิด Drill Mode แต่ TargetAngle ไม่ใช่ 0 ให้แสดงข้อความเตือนและไม่ให้เจาะ
-			warn("[Drill Mode] Cannot drill! DrillArm must be at TargetAngle = 0. Current:", currentTargetAngle)
-			print("Press Q to move DrillArm to position 0")
-		else
-			-- ถ้าปิด Drill Mode (isDrillModeActive = false) ไม่ต้องทำอะไร
-			-- ไม่เรียก hydraulicRemote เพราะ Head.HingeConstraint ถูก Disable แล้ว
-			print("[Drill Mode] Drill mode is off - press Q to activate")
-		end
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		local position = input.Position
+		local screenPoint = position and Vector2.new(position.X, position.Y) or nil
+		activateHydraulicOrDrill(screenPoint)
 	end
 
 	-- Manual control inputs (เฉพาะเมื่ออยู่ใน Rescue Mode หรือ Original Rescue Mode)
@@ -1064,9 +1582,6 @@ connections.inputBegan = UserInputService.InputBegan:Connect(function(input, gam
 			VehicleController.setSteerInput(1)
 		elseif input.KeyCode == Enum.KeyCode.D then
 			VehicleController.setSteerInput(-1)
-		elseif input.KeyCode == Enum.KeyCode.Space then
-			-- กด SPACE เพื่อ flip รถเมื่อคว่ำ หรือดันรถถ้าแค่ติดอยู่
-			VehicleController.handleSpaceKey()
 		end
 	-- else
 		-- WASD input ignored when not in control mode
@@ -1100,19 +1615,30 @@ connections.inputEnded = UserInputService.InputEnded:Connect(function(input, gam
 	end
 end)
 
+UserInputService.TouchTap:Connect(function(touchPositions, processed)
+	if processed then
+		return
+	end
+
+	local firstTouch = touchPositions and touchPositions[1]
+	if firstTouch then
+		activateHydraulicOrDrill(firstTouch)
+	end
+end)
+
 -- Character respawn handling
 player.CharacterAdded:Connect(function(newCharacter)
 	character = newCharacter
 	humanoid = character:WaitForChild("Humanoid")
-	
+
 	if isRescueMode then
 		stopRescueMode()
 	end
-	
+
 	-- Spawn RescueCompanion เมื่อผู้เล่นเกิด และเริ่มควบคุมทันที
 	wait(1) -- รอให้ character โหลดเสร็จ
 	spawnRescueCompanion() -- จะเริ่มควบคุมอัตโนมัติ
-	
+
 	-- Setup Simu again for new character (ถ้าต้องการใช้ Simu trigger)
 	setupSimuTouched()
 end)
@@ -1145,7 +1671,7 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 		spawn(function()
 			pcall(function()
 				-- ใช้ module WaitingSystem ที่มีอยู่
-				local simu = workspace:FindFirstChild("Simu")
+				local simu = Workspace:FindFirstChild("Simu")
 				if simu and simu:FindFirstChild("Attachment") then
 					local billboardGui = simu.Attachment:FindFirstChild("BillboardGui")
 					if billboardGui and billboardGui:FindFirstChild("Frame") then
@@ -1174,7 +1700,7 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 		-- เริ่ม Map Selection แล้วเริ่มเกม
 		spawn(function()
 			-- เริ่มนับถอยหลัง
-			local simu = workspace:FindFirstChild("Simu")
+			local simu = Workspace:FindFirstChild("Simu")
 			if simu and simu:FindFirstChild("Attachment") then
 				local billboardGui = simu.Attachment:FindFirstChild("BillboardGui")
 				if billboardGui and billboardGui:FindFirstChild("Frame") then
@@ -1235,6 +1761,7 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 		playerInGame = false
 		isRescueMode = false
 		isInOriginalRescueMode = false
+		updateVehicleActionButtons()
 
 		-- ลบ GUI ต่างๆ
 		cleanupGameGUIs()
@@ -1244,6 +1771,7 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 		if originalRescueModel then
 			originalRescueModel:Destroy()
 			VehicleController.setOriginalRescueModel(nil)
+			updateVehicleActionButtons()
 		end
 
 		-- รีเซ็ตกล้องกลับมาหาผู้เล่น
@@ -1276,7 +1804,7 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 
 		print("Successfully returned to lobby with new companion - ready for next game")
 
-		local simu = workspace:FindFirstChild("Simu")
+		local simu = Workspace:FindFirstChild("Simu")
 		if simu and simu:FindFirstChild("Attachment") then
 			local billboardGui = simu.Attachment:FindFirstChild("BillboardGui")
 			if billboardGui and billboardGui:FindFirstChild("Frame") then
