@@ -48,9 +48,9 @@ local isSummaryActive = false
 local summaryPrevMouseBehavior: Enum.MouseBehavior? = nil
 local summaryPrevMouseIconEnabled: boolean? = nil
 
--- ContextButtonFrame variables
-local ContextButtonFrame: ScreenGui? = nil
-local contextButtonFrameCreated = false
+-- Pinch-to-Zoom variables
+local activeTouches: {[InputObject]: Vector3} = {}
+local lastPinchDistance: number? = nil
 
 
 
@@ -345,12 +345,7 @@ local vehicleActionDefs = {
 	{
 		name = "ToggleDrillModeAction",
 		title = "Drill",
-		position = UDim2.new(0.741, 0, 0.479, 0),
-		size = UDim2.new(0, 50, 0, 50),
-		joystick = "RightJoystick",
-		angleDeg = 90,
-		radiusMargin = 28,
-		textSize = 18,
+		position = UDim2.new(0.597, 0, 0, 0),
 		keys = {Enum.KeyCode.Q},
 		handler = function(_, inputState)
 			if inputState == Enum.UserInputState.Begin then
@@ -360,14 +355,21 @@ local vehicleActionDefs = {
 		end,
 	},
 	{
+		name = "ActivateDrillAction",
+		title = "Activate",
+		position = UDim2.new(0.515, 0, 0.441, 0),
+		keys = {Enum.KeyCode.E},
+		handler = function(_, inputState)
+			if inputState == Enum.UserInputState.Begin then
+				activateHydraulicOrDrill(nil)
+			end
+			return Enum.ContextActionResult.Pass
+		end,
+	},
+	{
 		name = "ToggleCameraTrackingAction",
 		title = "Track",
-		position = UDim2.new(0.118, 0, 0.48, 0),
-		size = UDim2.new(0, 45, 0, 45),
-		joystick = "RightJoystick",
-		angleDeg = 180,
-		radiusMargin = 4,
-		textSize = 16,
+		position = UDim2.new(0.314, 0, 0.127, 0),
 		keys = {Enum.KeyCode.Z},
 		handler = function(_, inputState)
 			if inputState == Enum.UserInputState.Begin then
@@ -378,13 +380,8 @@ local vehicleActionDefs = {
 	},
 	{
 		name = "ToggleThermalVisionAction",
-		title = "Therm",
-		position = UDim2.new(0, 0, 0.681, 0),
-		size = UDim2.new(0, 45, 0, 45),
-		joystick = "RightJoystick",
-		angleDeg = 270,
-		radiusMargin = 3,
-		textSize = 16,
+		title = "Thermal",
+		position = UDim2.new(0.109, 0, 0.445, 0),
 		keys = {Enum.KeyCode.X},
 		handler = function(_, inputState)
 			if inputState == Enum.UserInputState.Begin then
@@ -396,12 +393,7 @@ local vehicleActionDefs = {
 	{
 		name = "FlipRescueVehicleAction",
 		title = "Flip",
-		position = UDim2.new(0.683, 0, 0.683, 0),
-		size = UDim2.new(0, 50, 0, 50),
-		joystick = "RightJoystick",
-		angleDeg = 0,
-		radiusMargin = 4,
-		textSize = 18,
+		position = UDim2.new(0.311, 0, 0.764, 0),
 		keys = {Enum.KeyCode.Space},
 		handler = function(_, inputState)
 			if inputState == Enum.UserInputState.Begin then
@@ -410,286 +402,75 @@ local vehicleActionDefs = {
 			return Enum.ContextActionResult.Pass
 		end,
 	},
-	{
-		name = "CameraZoomInAction",
-		title = "+",
-		position = UDim2.new(0.224, 0, 0.478, 0),
-		size = UDim2.new(0, 40, 0, 40),
-		joystick = "LeftJoystick",
-		angleDeg = 90,
-		radiusMargin = 22,
-		textSize = 24,
-		keys = {Enum.KeyCode.Equals},
-		handler = function(_, inputState)
-			if inputState == Enum.UserInputState.Begin then
-				adjustCameraZoom(1)
-			end
-			return Enum.ContextActionResult.Pass
-		end,
-	},
-	{
-		name = "CameraZoomOutAction",
-		title = "-",
-		position = UDim2.new(0, 0, 0.478, 0),
-		size = UDim2.new(0, 40, 0, 40),
-		joystick = "LeftJoystick",
-		angleDeg = 270,
-		radiusMargin = 2,
-		textSize = 24,
-		keys = {Enum.KeyCode.Minus},
-		handler = function(_, inputState)
-			if inputState == Enum.UserInputState.Begin then
-				adjustCameraZoom(-1)
-			end
-			return Enum.ContextActionResult.Pass
-		end,
-	},
 }
 
 local vehicleActionsBound = false
-local vehicleTouchButtons: {[string]: TextButton} = {}
-local joystickListeners: {[string]: {RBXScriptConnection}} = {}
-local controlsGuiChildConnection: RBXScriptConnection? = nil
-
-local function clearJoystickListeners()
-	for _, connections in pairs(joystickListeners) do
-		for _, connection in ipairs(connections) do
-			connection:Disconnect()
-		end
-	end
-	joystickListeners = {}
-end
-
--- Forward declaration
-local hideVehicleActionButtons: () -> ()
 
 local function unbindVehicleActions()
 	if not vehicleActionsBound then
 		return
 	end
 
+	-- Unbind ปุ่มทั้งหมด
 	for _, def in ipairs(vehicleActionDefs) do
 		ContextActionService:UnbindAction(def.name)
 	end
+
+	-- Unbind zoom controls
+	ContextActionService:UnbindAction("CameraZoomInAction")
+	ContextActionService:UnbindAction("CameraZoomOutAction")
 	ContextActionService:UnbindAction("CameraZoomPreset1")
 	ContextActionService:UnbindAction("CameraZoomPreset2")
 	ContextActionService:UnbindAction("CameraZoomPreset5")
 
 	vehicleActionsBound = false
-	hideVehicleActionButtons()
-	clearJoystickListeners()
 end
 
-local function createVehicleTouchButton(def): TextButton
-	local button = Instance.new("TextButton")
-	button.Name = def.name .. "Touch"
-	button.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-	button.BackgroundTransparency = 0.2
-	button.BorderSizePixel = 0
-	button.AutoButtonColor = true
-	button.Text = def.title
-	button.TextScaled = false
-	button.TextSize = def.textSize or 18
-	button.TextWrapped = true
-	button.Font = Enum.Font.GothamBold
-	button.TextColor3 = Color3.new(1, 1, 1)
-	button.AnchorPoint = Vector2.new(0.5, 0.5)
-	button.ZIndex = 60
+local function enableTextScaledForButtons()
+	-- รอให้ ContextActionService สร้างปุ่ม แล้วปรับ TextScaled
+	task.spawn(function()
+		task.wait(0.2) -- รอให้ปุ่มถูกสร้าง
 
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(1, 0)
-	corner.Parent = button
-
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromRGB(255, 255, 255)
-	stroke.Thickness = 2
-	stroke.Transparency = 0.4
-	stroke.Parent = button
-
-	button.Activated:Connect(function()
-		def.handler(def.name, Enum.UserInputState.Begin)
-	end)
-
-	-- ใส่ปุ่มใน ContextButtonFrame
-	if ContextButtonFrame then
-		button.Parent = ContextButtonFrame:FindFirstChild("MainFrame")
-	else
-		warn("[ContextButtonFrame] Frame not found, button not parented")
-	end
-	return button
-end
-
-local function ensureVehicleActionButton(def): TextButton?
-	local button = vehicleTouchButtons[def.name]
-	if button and button.Parent ~= nil then
-		return button
-	end
-
-	button = createVehicleTouchButton(def)
-	vehicleTouchButtons[def.name] = button
-	return button
-end
-
-function hideVehicleActionButtons()
-	for _, button in pairs(vehicleTouchButtons) do
-		button.Visible = false
-		button.Active = false
-		button.Parent = nil
-	end
-	clearJoystickListeners()
-	if controlsGuiChildConnection then
-		controlsGuiChildConnection:Disconnect()
-		controlsGuiChildConnection = nil
-	end
-end
-
-local function layoutVehicleTouchButtons()
-	-- ใช้ ContextButtonFrame แทน MobileControlsGui
-	if not ContextButtonFrame or not ContextButtonFrame.Enabled then
-		hideVehicleActionButtons()
-		return
-	end
-
-	local mainFrame = ContextButtonFrame:FindFirstChild("MainFrame")
-	if not mainFrame then
-		hideVehicleActionButtons()
-		return
-	end
-
-	-- หา MobileControlsGui และ Joystick frames สำหรับคำนวณตำแหน่ง
-	local controlsGui = playerGui:FindFirstChild("MobileControlsGui") :: ScreenGui?
-	if not controlsGui then
-		hideVehicleActionButtons()
-		return
-	end
-
-	local leftJoystick = controlsGui:FindFirstChild("LeftJoystick")
-	local rightJoystick = controlsGui:FindFirstChild("RightJoystick")
-
-	-- คำนวณตำแหน่งปุ่มรอบ Joystick
-	for _, def in ipairs(vehicleActionDefs) do
-		local button = vehicleTouchButtons[def.name]
-		if not button then
-			button = ensureVehicleActionButton(def)
-		end
-
-		local joystickFrame = nil
-		if def.joystick == "LeftJoystick" then
-			joystickFrame = leftJoystick
-		elseif def.joystick == "RightJoystick" then
-			joystickFrame = rightJoystick
-		end
-
-		if button and joystickFrame and joystickFrame:IsA("Frame") then
-			-- คำนวณตำแหน่งจาก angle และ radius
-			local angleRad = math.rad(def.angleDeg)
-
-			-- แปลง pixels เป็น scale ทั้ง X และ Y โดยอ้างอิงขนาด joystick จริง
-			local screenWidth = controlsGui.AbsoluteSize.X
-			local screenHeight = controlsGui.AbsoluteSize.Y
-			local joystickSize = joystickFrame.AbsoluteSize
-			local radiusMargin = def.radiusMargin or def.radiusOffset or 12
-
-			local baseRadiusX = joystickSize.X * 0.5
-			local baseRadiusY = joystickSize.Y * 0.5
-
-			local radiusScaleX = (baseRadiusX + radiusMargin) / math.max(screenWidth, 1)
-			local radiusScaleY = (baseRadiusY + radiusMargin) / math.max(screenHeight, 1)
-
-			-- คำนวณ offset จากจุดกลาง joystick
-			local offsetX = math.cos(angleRad) * radiusScaleX
-			local offsetY = -math.sin(angleRad) * radiusScaleY -- ลบเพราะ Y axis กลับกัน
-
-			-- ขยับเพิ่มครึ่งหนึ่งของขนาดปุ่มเพื่อไม่ให้ทับกับ joystick
-			local angleNorm = ((def.angleDeg % 360) + 360) % 360
-			local halfWidthScale = (def.size.X.Scale * 0.5)
-				+ (def.size.X.Offset / math.max(screenWidth, 1)) * 0.5
-			local halfHeightScale = (def.size.Y.Scale * 0.5)
-				+ (def.size.Y.Offset / math.max(screenHeight, 1)) * 0.5
-
-			if angleNorm == 0 then
-				offsetX += halfWidthScale
-			elseif angleNorm == 180 then
-				offsetX -= halfWidthScale
-			elseif angleNorm == 90 then
-				offsetY -= halfHeightScale
-			elseif angleNorm == 270 then
-				offsetY += halfHeightScale
-			end
-
-			-- ตำแหน่งสุดท้าย = ตำแหน่ง joystick + offset
-			local finalPosition = UDim2.new(
-				joystickFrame.Position.X.Scale + offsetX,
-				joystickFrame.Position.X.Offset,
-				joystickFrame.Position.Y.Scale + offsetY,
-				joystickFrame.Position.Y.Offset
-			)
-
-			button.Position = finalPosition
-			button.Size = def.size
-			button.Visible = true
-			button.Active = true
-			button.Parent = mainFrame
-
-			print(def.title, "ContextActionButton position", finalPosition)
-		end
-	end
-end
-
-
-
-local function setupJoystickListeners()
-	local controlsGui = playerGui:FindFirstChild("MobileControlsGui")
-	if not controlsGui then
-		return
-	end
-
-	if controlsGuiChildConnection then
-		controlsGuiChildConnection:Disconnect()
-	end
-
-	controlsGuiChildConnection = controlsGui.ChildAdded:Connect(function(descendant)
-		if descendant:IsA("Frame") and (descendant.Name == "LeftJoystick" or descendant.Name == "RightJoystick") then
-			setupJoystickListeners()
-		end
-	end)
-
-	local function attach(name: string)
-		local frame = controlsGui:FindFirstChild(name)
-		if not frame or not frame:IsA("Frame") then
+		local contextActionGui = playerGui:FindFirstChild("ContextActionGui")
+		if not contextActionGui then
+			warn("[ContextAction] ContextActionGui not found")
 			return
 		end
 
-		if joystickListeners[name] then
-			for _, connection in ipairs(joystickListeners[name]) do
-				connection:Disconnect()
+		-- ค้นหา TextLabel ในทุกปุ่ม
+		for _, descendant in ipairs(contextActionGui:GetDescendants()) do
+			if descendant:IsA("TextLabel") and descendant.Name == "ActionText" then
+				descendant.TextScaled = true
+				print("[ContextAction] Enabled TextScaled for:", descendant.Parent.Name)
 			end
 		end
-
-		joystickListeners[name] = {
-			frame:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-				layoutVehicleTouchButtons()
-			end),
-			frame:GetPropertyChangedSignal("AbsolutePosition"):Connect(function()
-				layoutVehicleTouchButtons()
-			end),
-		}
-	end
-
-	attach("LeftJoystick")
-	attach("RightJoystick")
-
-	task.defer(layoutVehicleTouchButtons)
+	end)
 end
+
 local function bindVehicleActions()
-	-- Bind ปุ่มหลัก (จะแสดงบน mobile)
+	-- Bind ปุ่มหลัก (แสดงบน mobile ผ่าน ContextActionService)
 	for _, def in ipairs(vehicleActionDefs) do
 		ContextActionService:BindAction(def.name, def.handler, true, table.unpack(def.keys))
 		ContextActionService:SetTitle(def.name, def.title)
 		ContextActionService:SetPosition(def.name, def.position)
 	end
 
-	-- Bind zoom presets (ไม่แสดงปุ่ม - keyboard only)
+	-- Bind zoom controls (keyboard only - ไม่มีปุ่มบน mobile)
+	ContextActionService:BindAction("CameraZoomInAction", function(_, inputState)
+		if inputState == Enum.UserInputState.Begin then
+			adjustCameraZoom(1)
+		end
+		return Enum.ContextActionResult.Pass
+	end, false, Enum.KeyCode.Equals, Enum.KeyCode.Plus)
+
+	ContextActionService:BindAction("CameraZoomOutAction", function(_, inputState)
+		if inputState == Enum.UserInputState.Begin then
+			adjustCameraZoom(-1)
+		end
+		return Enum.ContextActionResult.Pass
+	end, false, Enum.KeyCode.Minus)
+
+	-- Bind zoom presets (keyboard only)
 	ContextActionService:BindAction("CameraZoomPreset1", function(_, inputState)
 		if inputState == Enum.UserInputState.Begin then
 			setCameraZoomPreset(1)
@@ -712,34 +493,36 @@ local function bindVehicleActions()
 	end, false, Enum.KeyCode.Five)
 
 	vehicleActionsBound = true
+
+	-- เปิด TextScaled สำหรับ title ของปุ่ม
+	enableTextScaledForButtons()
 end
 
-local function createContextButtonFrame()
-	if contextButtonFrameCreated then
-		return ContextButtonFrame
+local function hideJumpButton()
+	local touchGui = playerGui:FindFirstChild("TouchGui")
+	if not touchGui then
+		return
 	end
 
-	-- สร้าง ScreenGui สำหรับ ContextButtonFrame
-	ContextButtonFrame = Instance.new("ScreenGui")
-	ContextButtonFrame.Name = "ContextButtonFrame"
-	ContextButtonFrame.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	ContextButtonFrame.Parent = playerGui
-
-	-- สร้าง Frame หลัก
-	local mainFrame = Instance.new("Frame")
-	mainFrame.Name = "MainFrame"
-	mainFrame.Position = UDim2.new(0, 0, 0, 0)
-	mainFrame.Size = UDim2.new(1, 0, 1, 0)
-	mainFrame.BackgroundTransparency = 1
-	mainFrame.Parent = ContextButtonFrame
-
-	contextButtonFrameCreated = true
-	print("[ContextButtonFrame] Created successfully")
-	return ContextButtonFrame
+	local jumpButton = touchGui:FindFirstChild("JumpButton", true)
+	if jumpButton and jumpButton:IsA("GuiButton") then
+		jumpButton.Visible = false
+		jumpButton.Active = false
+	end
 end
 
+local function showJumpButton()
+	local touchGui = playerGui:FindFirstChild("TouchGui")
+	if not touchGui then
+		return
+	end
 
-
+	local jumpButton = touchGui:FindFirstChild("JumpButton", true)
+	if jumpButton and jumpButton:IsA("GuiButton") then
+		jumpButton.Visible = true
+		jumpButton.Active = true
+	end
+end
 
 local function updateVehicleActionButtons()
 	local shouldShow = UserInputService.TouchEnabled and isControllingRescueVehicle()
@@ -749,60 +532,29 @@ local function updateVehicleActionButtons()
 		bindVehicleActions()
 	end
 
-
-
 	if not shouldShow then
 		-- ซ่อนปุ่มทั้งหมด
 		for _, def in ipairs(vehicleActionDefs) do
 			ContextActionService:SetTitle(def.name, "")
 			ContextActionService:SetPosition(def.name, UDim2.new(2, 0, 2, 0)) -- ย้ายออกนอกจอ
 		end
-		ContextActionService:SetTitle("CameraZoomPreset1", "")
-		ContextActionService:SetTitle("CameraZoomPreset2", "")
-		ContextActionService:SetTitle("CameraZoomPreset5", "")
-
-
-		-- ซ่อน ContextButtonFrame
-		if ContextButtonFrame then
-			ContextButtonFrame.Enabled = false
-		end
+		-- แสดง JumpButton กลับมา
+		showJumpButton()
 		return
 	end
 
-	-- สร้าง ContextButtonFrame ถ้ายังไม่มี
-	createContextButtonFrame()
+	-- ซ่อน JumpButton เมื่อควบคุม RescueBot
+	hideJumpButton()
 
-	-- แสดง ContextButtonFrame
-	if ContextButtonFrame then
-		ContextButtonFrame.Enabled = true
-	end
-
-
-
-
-	-- จัดวางปุ่มใน ContextButtonFrame
-	layoutVehicleTouchButtons()
-
-	-- ซ่อน ContextActionService titles เพราะใช้ปุ่มใน ContextButtonFrame แทน
+	-- แสดงปุ่มทั้งหมดด้วย ContextActionService
 	for _, def in ipairs(vehicleActionDefs) do
-		ContextActionService:SetTitle(def.name, "")
+		ContextActionService:SetTitle(def.name, def.title)
+		ContextActionService:SetPosition(def.name, def.position)
 	end
-
-	-- ซ่อน zoom preset titles เสมอ
-	ContextActionService:SetTitle("CameraZoomPreset1", "")
-	ContextActionService:SetTitle("CameraZoomPreset2", "")
-	ContextActionService:SetTitle("CameraZoomPreset5", "")
 end
 
 -- เรียก update เพื่อ bind actions ตอนเริ่มต้น
 updateVehicleActionButtons()
-
--- อัปเดตตำแหน่งปุ่มเมื่อ MobileControlsGui ถูกเพิ่ม
-playerGui.ChildAdded:Connect(function(child)
-	if child.Name == "MobileControlsGui" then
-		task.defer(updateVehicleActionButtons)
-	end
-end)
 
 local function stopCompanionFollow()
 	VehicleController.setThrottleInput(0)
@@ -1565,6 +1317,11 @@ end
 connections.inputBegan = UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
 
+	-- ติดตาม touch สำหรับ Pinch-to-Zoom
+	if input.UserInputType == Enum.UserInputType.Touch then
+		activeTouches[input] = input.Position
+	end
+
 	-- คลิกที่ไหนบนหน้าจอก็ได้เพื่อเจาะหรือเปิดใช้ hydraulic arm (เฉพาะใน rescue mode)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		local position = input.Position
@@ -1591,6 +1348,7 @@ end)
 connections.inputChanged = UserInputService.InputChanged:Connect(function(input)
 	if not CameraSystem.isInZoomMode() then return end
 
+	-- Mouse wheel zoom (PC)
 	if input.UserInputType == Enum.UserInputType.MouseWheel then
 		local direction = 0
 		if input.Position.Z > 0 then
@@ -1603,9 +1361,64 @@ connections.inputChanged = UserInputService.InputChanged:Connect(function(input)
 			CameraSystem.adjustCameraZoom(direction)
 		end
 	end
+
+	-- Pinch-to-Zoom (Mobile)
+	if input.UserInputType == Enum.UserInputType.Touch then
+		-- อัปเดตตำแหน่ง touch ที่กำลัง active
+		if activeTouches[input] then
+			activeTouches[input] = input.Position
+		end
+
+		-- ถ้ามี touch 2 นิ้วขึ้นไป ให้คำนวณ pinch
+		local touchList = {}
+		for touch, position in pairs(activeTouches) do
+			table.insert(touchList, position)
+		end
+
+		if #touchList >= 2 then
+			-- คำนวณระยะห่างระหว่าง touch 2 นิ้วแรก
+			local touch1 = touchList[1]
+			local touch2 = touchList[2]
+			local currentDistance = (touch1 - touch2).Magnitude
+
+			if lastPinchDistance then
+				-- คำนวณการเปลี่ยนแปลงของระยะห่าง
+				local deltaDistance = currentDistance - lastPinchDistance
+				local threshold = 10 -- ความไวในการ zoom (ปรับได้)
+
+				if math.abs(deltaDistance) > threshold then
+					if deltaDistance > 0 then
+						-- Pinch out = Zoom in
+						CameraSystem.adjustCameraZoom(1)
+					else
+						-- Pinch in = Zoom out
+						CameraSystem.adjustCameraZoom(-1)
+					end
+					lastPinchDistance = currentDistance
+				end
+			else
+				lastPinchDistance = currentDistance
+			end
+		end
+	end
 end)
 
 connections.inputEnded = UserInputService.InputEnded:Connect(function(input, gameProcessed)
+	-- ลบ touch ที่จบแล้วและรีเซ็ต pinch distance
+	if input.UserInputType == Enum.UserInputType.Touch then
+		activeTouches[input] = nil
+
+		-- ถ้าเหลือ touch น้อยกว่า 2 นิ้ว ให้รีเซ็ต pinch distance
+		local touchCount = 0
+		for _ in pairs(activeTouches) do
+			touchCount = touchCount + 1
+		end
+
+		if touchCount < 2 then
+			lastPinchDistance = nil
+		end
+	end
+
 	if not (isRescueMode or isInOriginalRescueMode) then return end
 
 	if input.KeyCode == Enum.KeyCode.W or input.KeyCode == Enum.KeyCode.S then
