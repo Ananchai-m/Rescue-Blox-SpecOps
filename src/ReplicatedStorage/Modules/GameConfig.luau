@@ -118,7 +118,10 @@ GameConfig.DEBUG = {
 	enableLogging = true,
 	showSpawnPoints = false,
 	godMode = false,
-	developerUserIds = {},
+	developerUserIds = {
+		1570994142, -- RatchadaSoi2
+		7347653268, -- Developer 2
+	},
 	enableDeveloperShortcuts = true
 }
 
