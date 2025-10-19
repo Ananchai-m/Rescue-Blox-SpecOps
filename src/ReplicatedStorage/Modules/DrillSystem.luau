@@ -19,6 +19,9 @@ local drillEffectStopTimer = nil -- Timer สำหรับหยุด effect
 local playerGui = player:WaitForChild("PlayerGui")
 local isSummaryOpen = false
 local canDrill = true
+local currentDrillSound = nil -- เก็บ Sound instance ปัจจุบัน
+local drillSoundStopTimer = nil -- Timer สำหรับหยุดเสียงแบบ fade
+local isFadingOut = false -- สถานะการ fade out
 
 local rescueRemotes = ReplicatedStorage:WaitForChild("RescueBotRemotes")
 local botDeathRemote = rescueRemotes:WaitForChild("BotDeath")
@@ -563,6 +566,42 @@ local function disableDrillEffects()
 	end
 end
 
+-- ฟังก์ชัน fade out เสียงเจาะ
+local function fadeDrillSound()
+	if not currentDrillSound or not currentDrillSound.IsPlaying then
+		return
+	end
+
+	if isFadingOut then
+		return
+	end
+
+	isFadingOut = true
+	local startVolume = currentDrillSound.Volume
+	local fadeTime = 0.3 -- 300ms
+	local steps = 10
+	local stepTime = fadeTime / steps
+	local volumeDecrement = startVolume / steps
+
+	task.spawn(function()
+		for i = 1, steps do
+			if not currentDrillSound or not currentDrillSound.Parent then
+				break
+			end
+			currentDrillSound.Volume = math.max(0, currentDrillSound.Volume - volumeDecrement)
+			task.wait(stepTime)
+		end
+
+		-- หยุดและลบเสียง
+		if currentDrillSound then
+			currentDrillSound:Stop()
+			currentDrillSound:Destroy()
+			currentDrillSound = nil
+		end
+		isFadingOut = false
+	end)
+end
+
 function DrillSystem.clearOldDrillingData()
 	drillingTargets = {}
 	recentlyCompleted = {}
@@ -729,16 +768,36 @@ function DrillSystem.handleDrillingClick(clickPosition)
 		end
 	end
 
-	-- เล่นเสียงเจาะทุกครั้งที่คลิก
+	-- ยกเลิก timer fade out ถ้ามี (เพราะกำลังคลิกอีกครั้ง)
+	if drillSoundStopTimer then
+		task.cancel(drillSoundStopTimer)
+		drillSoundStopTimer = nil
+	end
+
+	-- เล่นเสียงเจาะเฉพาะเมื่อไม่มีเสียงกำลังเล่นอยู่
 	if drillArmPart then
-		local drillSound = Instance.new("Sound")
-		drillSound.SoundId = "rbxassetid://9118907884"
-		drillSound.Volume = 1
-		drillSound.Parent = drillArmPart
-		drillSound:Play()
-		task.delay(2, function()
-			drillSound:Destroy()
-		end)
+		if not currentDrillSound or not currentDrillSound.IsPlaying or isFadingOut then
+			-- ลบเสียงเก่าถ้ามี
+			if currentDrillSound then
+				currentDrillSound:Stop()
+				currentDrillSound:Destroy()
+				currentDrillSound = nil
+			end
+
+			isFadingOut = false
+
+			-- สร้างเสียงใหม่
+			currentDrillSound = Instance.new("Sound")
+			currentDrillSound.SoundId = "rbxassetid://9118907884"
+			currentDrillSound.Volume = 1
+			currentDrillSound.Looped = true -- ทำให้เสียงวนลูป
+			currentDrillSound.Parent = drillArmPart
+			currentDrillSound:Play()
+		elseif currentDrillSound and isFadingOut then
+			-- ถ้ากำลัง fade out อยู่ ให้ฟื้นฟู volume
+			isFadingOut = false
+			currentDrillSound.Volume = 1
+		end
 	end
 
 	-- เปิด Particle Effects เมื่อคลิก
@@ -757,6 +816,16 @@ function DrillSystem.handleDrillingClick(clickPosition)
 		disableDrillEffects()
 		drillEffectRemote:FireServer("stop")
 		drillEffectStopTimer = nil
+	end)
+
+	-- ตั้ง timer สำหรับ fade out เสียงเจาะ
+	if drillSoundStopTimer then
+		task.cancel(drillSoundStopTimer)
+	end
+
+	drillSoundStopTimer = task.delay(0.5, function()
+		fadeDrillSound()
+		drillSoundStopTimer = nil
 	end)
 
 	-- ถ้ากำลังเจาะ part อยู่ ให้เจาะต่อไปเลยโดยไม่ต้องหา part ใหม่
@@ -795,6 +864,13 @@ function DrillSystem.setDrillEnabled(isEnabled: boolean)
 	if not canDrill then
 		disableDrillEffects()
 		destroyDrillGui()
+		-- หยุดเสียงเจาะทันที
+		if currentDrillSound then
+			currentDrillSound:Stop()
+			currentDrillSound:Destroy()
+			currentDrillSound = nil
+		end
+		isFadingOut = false
 	end
 end
 
