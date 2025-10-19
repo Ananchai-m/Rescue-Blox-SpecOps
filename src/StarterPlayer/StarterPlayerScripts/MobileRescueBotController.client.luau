@@ -233,6 +233,18 @@ end
 local function handleTouchBegan(touch: InputObject)
 	if not isBotControlActive then return end
 
+	-- ตรวจสอบว่ามี RescueBillboard active อยู่หรือไม่ (อยู่ใน Workspace)
+	local victimFolder = workspace:FindFirstChild("VictimFolders")
+	if victimFolder then
+		for _, victim in ipairs(victimFolder:GetChildren()) do
+			local billboard = victim:FindFirstChild("RescueBillboard")
+			if billboard and billboard:IsA("BillboardGui") and billboard.Enabled then
+				print("[MobileTouchControl] Found active RescueBillboard, ignoring touch")
+				return
+			end
+		end
+	end
+
 	-- บันทึกจุดเริ่มต้นของการลาก
 	touchActive = true
 	touchStartPosition = Vector2.new(touch.Position.X, touch.Position.Y)
@@ -291,6 +303,21 @@ end)
 -- Mouse input handling (สำหรับทดสอบใน Studio)
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
+
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		-- ตรวจสอบว่ามี RescueBillboard active อยู่หรือไม่ (อยู่ใน Workspace)
+		local victimFolder = workspace:FindFirstChild("VictimFolders")
+		if victimFolder then
+			for _, victim in ipairs(victimFolder:GetChildren()) do
+				local billboard = victim:FindFirstChild("RescueBillboard")
+				if billboard and billboard:IsA("BillboardGui") and billboard.Enabled then
+					print("[MobileTouchControl] Found active RescueBillboard, ignoring mouse")
+					return
+				end
+			end
+		end
+	end
+
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		local mockTouch = {
 			Position = input.Position,

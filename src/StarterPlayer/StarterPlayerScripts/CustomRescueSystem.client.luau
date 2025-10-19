@@ -44,12 +44,16 @@ local stopRescue: () -> ()
 
 -- Function to create billboard UI on victim
 local function createVictimBillboard(victim)
+	print("[CustomRescueSystem] createVictimBillboard called for:", victim and victim.Name or "nil")
+
 	if not victim or not victim:FindFirstChild("HumanoidRootPart") then
+		print("[CustomRescueSystem] Cannot create billboard - no victim or HumanoidRootPart")
 		return nil
 	end
 
 	-- Remove existing billboard
 	if victimBillboard then
+		print("[CustomRescueSystem] Destroying old billboard")
 		victimBillboard:Destroy()
 		victimBillboard = nil
 	end
@@ -63,7 +67,13 @@ local function createVictimBillboard(victim)
 	victimBillboard.Size = UDim2.new(4, 0, 2, 0)
 	victimBillboard.StudsOffset = Vector3.new(0, 3, 0) -- แสดงเหนือหัว victim
 	victimBillboard.Adornee = rootPart
+	victimBillboard.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	victimBillboard.ClipsDescendants = false
+	victimBillboard.Enabled = true
+	victimBillboard.Active = true
 	victimBillboard.Parent = victim
+
+	print("[CustomRescueSystem] Billboard created and parented to", victim.Name)
 
 	-- Main frame (ทำเป็น TextButton เพื่อให้กดได้)
 	local mainFrame = Instance.new("TextButton")
@@ -75,18 +85,98 @@ local function createVictimBillboard(victim)
 	mainFrame.BorderSizePixel = 0
 	mainFrame.Text = ""
 	mainFrame.AutoButtonColor = false
+	mainFrame.Active = true
+	mainFrame.Selectable = true
+	mainFrame.Modal = false
+	mainFrame.ZIndex = 10
 	mainFrame.Parent = victimBillboard
 
-	-- เชื่อมการกดปุ่มกับการ Rescue
-	mainFrame.MouseButton1Down:Connect(function()
-		if nearestVictim == victim and not isRescuing then
-			startRescue()
+	print("[CustomRescueSystem] MainFrame created with properties - Active:", mainFrame.Active, "Selectable:", mainFrame.Selectable)
+
+	-- ตัวแปรสำหรับติดตาม input state
+	local isHolding = false
+
+	print("[CustomRescueSystem] Setting up input event listeners...")
+
+	-- TEST: ใช้ UserInputService แทน
+	local uisConnection1, uisConnection2
+
+	uisConnection1 = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		-- ไม่สนใจ gameProcessed เพราะต้องการดัก input ทั้งหมด
+		print("[CustomRescueSystem] UIS InputBegan:", input.UserInputType.Name, "gameProcessed:", gameProcessed)
+
+		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			if nearestVictim == victim and not isRescuing and not isHolding then
+				isHolding = true
+				startRescue()
+				print("[CustomRescueSystem] Started rescue via UIS", input.UserInputType.Name)
+			end
 		end
 	end)
 
+	uisConnection2 = UserInputService.InputEnded:Connect(function(input, gameProcessed)
+		print("[CustomRescueSystem] UIS InputEnded:", input.UserInputType.Name, "gameProcessed:", gameProcessed)
+
+		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			if isHolding then
+				isHolding = false
+				if isRescuing then
+					stopRescue()
+					print("[CustomRescueSystem] Stopped rescue via UIS", input.UserInputType.Name)
+				end
+			end
+		end
+	end)
+
+	-- DEBUG: Log all inputs on mainFrame (อาจจะไม่ทำงานเพราะ BillboardGui limitation)
+	mainFrame.InputBegan:Connect(function(input)
+		print("[CustomRescueSystem] MainFrame InputBegan detected:", input.UserInputType.Name, "- nearestVictim:", nearestVictim and nearestVictim.Name or "nil", "- isRescuing:", isRescuing, "- isHolding:", isHolding)
+	end)
+
+	mainFrame.InputEnded:Connect(function(input)
+		print("[CustomRescueSystem] InputEnded detected:", input.UserInputType.Name, "- isHolding:", isHolding, "- isRescuing:", isRescuing)
+	end)
+
+	mainFrame.InputChanged:Connect(function(input)
+		print("[CustomRescueSystem] InputChanged detected:", input.UserInputType.Name, "- Delta:", input.Delta)
+	end)
+
+	mainFrame.MouseButton1Down:Connect(function()
+		print("[CustomRescueSystem] MouseButton1Down event fired")
+	end)
+
 	mainFrame.MouseButton1Up:Connect(function()
-		if isRescuing then
-			stopRescue()
+		print("[CustomRescueSystem] MouseButton1Up event fired")
+	end)
+
+	mainFrame.TouchTap:Connect(function()
+		print("[CustomRescueSystem] TouchTap event fired")
+	end)
+
+	mainFrame.TouchLongPress:Connect(function()
+		print("[CustomRescueSystem] TouchLongPress event fired")
+	end)
+
+	-- รองรับ Touch Input สำหรับ Mobile และ Mouse สำหรับ PC
+	mainFrame.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			if nearestVictim == victim and not isRescuing and not isHolding then
+				isHolding = true
+				startRescue()
+				print("[CustomRescueSystem] Started rescue via", input.UserInputType.Name)
+			end
+		end
+	end)
+
+	mainFrame.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			if isHolding then
+				isHolding = false
+				if isRescuing then
+					stopRescue()
+					print("[CustomRescueSystem] Stopped rescue via", input.UserInputType.Name)
+				end
+			end
 		end
 	end)
 
@@ -141,6 +231,8 @@ local function createVictimBillboard(victim)
 	local progressFillCorner = Instance.new("UICorner")
 	progressFillCorner.CornerRadius = UDim.new(0.5, 0)
 	progressFillCorner.Parent = progressBar
+
+	print("[CustomRescueSystem] Billboard setup complete - Enabled:", victimBillboard.Enabled, "Parent:", victimBillboard.Parent and victimBillboard.Parent.Name or "nil")
 
 	return victimBillboard, progressBg
 end
@@ -340,12 +432,14 @@ local function updateRescueUI()
 	end
 
 	if victim ~= nearestVictim then
+		print("[CustomRescueSystem] Nearest victim changed from", nearestVictim and nearestVictim.Name or "nil", "to", victim and victim.Name or "nil")
 		nearestVictim = victim
 
 		if nearestVictim then
 			-- Create billboard on victim
+			print("[CustomRescueSystem] Creating billboard for", nearestVictim.Name, "at distance", math.floor(distance), "studs")
 			createVictimBillboard(nearestVictim)
-			print("[CustomRescueSystem] Showing rescue UI for", nearestVictim.Name, "at distance", math.floor(distance), "studs")
+			print("[CustomRescueSystem] Billboard created successfully")
 		else
 			-- Remove billboard immediately
 			if victimBillboard then
