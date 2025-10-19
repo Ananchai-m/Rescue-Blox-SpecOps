@@ -516,3 +516,40 @@ function GameTimer.clearCoins()
 end
 
 return GameTimer
+
+-- รับสัญญาณจาก Server เพื่อเล่นเสียงนับถอยหลังพร้อมกัน
+countdownSoundRemote.OnClientEvent:Connect(function(action)
+	if action == "start" then
+		-- ทุกคนจะเล่นเสียงพร้อมกันเมื่อได้รับสัญญาณจาก server
+		if timerGui and timerGui:FindFirstChild("TimerFrame") then
+			local timerFrame = timerGui.TimerFrame
+			local timerLabel = timerFrame:FindFirstChild("TimerLabel")
+			
+			if timerLabel then
+				-- หยุดเสียงเก่าถ้ามี
+				if countdownSound then
+					countdownSound:Stop()
+					countdownSound:Destroy()
+				end
+				
+				-- สร้างเสียงใหม่
+				countdownSound = Instance.new("Sound")
+				countdownSound.SoundId = "rbxassetid://74033679363032"
+				countdownSound.Volume = 0.1 -- เริ่มจากเสียงเบาๆ
+				countdownSound.Looped = true
+				countdownSound.Parent = timerLabel
+				countdownSound:Play()
+				
+				print("[GameTimer] Started countdown sound (synced)")
+			end
+		end
+	elseif action == "stop" then
+		-- หยุดเสียงเมื่อได้รับสัญญาณจาก server
+		if countdownSound then
+			countdownSound:Stop()
+			countdownSound:Destroy()
+			countdownSound = nil
+			print("[GameTimer] Stopped countdown sound (synced)")
+		end
+	end
+end)
