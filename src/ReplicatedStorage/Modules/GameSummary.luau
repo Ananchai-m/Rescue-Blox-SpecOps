@@ -85,7 +85,7 @@ function GameSummary.getSortedPlayers()
 end
 
 -- ฟังก์ชันสร้าง Summary UI
-function GameSummary.createSummaryUI(player)
+function GameSummary.createSummaryUI(player, missionResultSuccess, missionResultMessage)
 	local playerGui = player:WaitForChild("PlayerGui")
 
 	-- ลบ GUI เก่าถ้ามี
@@ -145,8 +145,27 @@ function GameSummary.createSummaryUI(player)
 	titleLabel.Size = UDim2.new(1, 0, 0.15, 0)
 	titleLabel.Position = UDim2.new(0, 0, 0, 0)
 	titleLabel.BackgroundTransparency = 1
-	titleLabel.Text = "Mission Summary"
-	titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+
+	-- ใช้ mission result ที่ส่งมาเป็น parameter (ถ้ามี) หรือดึงจาก client-side storage
+	local resultSuccess = missionResultSuccess
+	local resultMessage = missionResultMessage
+
+	-- ถ้าไม่มีค่าส่งมา ให้ลองดึงจาก client-side (สำหรับกรณีที่ client เรียกเอง)
+	if resultSuccess == nil and resultMessage == nil then
+		resultSuccess, resultMessage = GameSummary.getMissionResult()
+	end
+
+	titleLabel.Text = resultMessage or "Mission Summary"
+
+	-- เปลี่ยนสีตามผลลัพธ์
+	if resultSuccess == true then
+		titleLabel.TextColor3 = Color3.fromRGB(100, 255, 100) -- เขียว = สำเร็จ
+	elseif resultSuccess == false then
+		titleLabel.TextColor3 = Color3.fromRGB(255, 100, 100) -- แดง = ล้มเหลว
+	else
+		titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255) -- ขาว = ปกติ
+	end
+
 	titleLabel.TextScaled = true
 	titleLabel.Font = Enum.Font.GothamBold
 	titleLabel.TextStrokeTransparency = 0
@@ -435,8 +454,8 @@ function GameSummary.createPlayerEntry(playerData, rank, parent)
 end
 
 -- ฟังก์ชันแสดง Summary ให้ผู้เล่น
-function GameSummary.showSummary(player)
-	local summaryGui, scrollFrame = GameSummary.createSummaryUI(player)
+function GameSummary.showSummary(player, missionResultSuccess, missionResultMessage)
+	local summaryGui, scrollFrame = GameSummary.createSummaryUI(player, missionResultSuccess, missionResultMessage)
 	local sortedPlayers = GameSummary.getSortedPlayers()
 
 	-- สร้าง player entries
@@ -475,9 +494,9 @@ function GameSummary.showSummary(player)
 end
 
 -- ฟังก์ชันแสดง Summary ให้ทุกคน
-function GameSummary.showSummaryToAll()
+function GameSummary.showSummaryToAll(missionResultSuccess, missionResultMessage)
 	for _, player in ipairs(Players:GetPlayers()) do
-		GameSummary.showSummary(player)
+		GameSummary.showSummary(player, missionResultSuccess, missionResultMessage)
 	end
 end
 
@@ -585,6 +604,30 @@ function GameSummary.printStats()
 		print("   Victims: " .. playerData.victims .. ", Coins: " .. playerData.coins)
 	end
 	print("========================")
+end
+
+
+-- ตัวแปรเก็บผลการช่วยเหลือ (จะถูกตั้งค่าจาก client script)
+local missionSuccess = nil
+local missionMessage = "Mission Summary"
+
+-- ฟังก์ชันตั้งค่าผลการช่วยเหลือ (เรียกจาก client script)
+function GameSummary.setMissionResult(isSuccess, message)
+	missionSuccess = isSuccess
+	missionMessage = message or (isSuccess and "Mission Success" or "Mission Failed")
+	print(string.format("[GameSummary] setMissionResult called - isSuccess: %s, message: %s", tostring(isSuccess), missionMessage))
+end
+
+-- ฟังก์ชันดึงข้อมูลผลการช่วยเหลือ
+function GameSummary.getMissionResult()
+	print(string.format("[GameSummary] getMissionResult called - returning isSuccess: %s, message: %s", tostring(missionSuccess), missionMessage))
+	return missionSuccess, missionMessage
+end
+
+-- ฟังก์ชันรีเซ็ตผลการช่วยเหลือ
+function GameSummary.resetMissionResult()
+	missionSuccess = nil
+	missionMessage = "Mission Summary"
 end
 
 return GameSummary

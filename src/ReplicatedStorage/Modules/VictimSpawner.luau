@@ -354,4 +354,42 @@ function VictimSpawner.checkSpawnPoints()
 	return true, "Found " .. spawnPointCount .. " spawn points"
 end
 
+
+-- ฟังก์ชันนับจำนวน victims ทั้งหมดที่ spawn
+function VictimSpawner.getTotalVictimCount()
+	-- หา SpawnVictims folder เพื่อนับจำนวน spawn points
+	local spawnVictims = Workspace:FindFirstChild("SpawnVictims")
+	if not spawnVictims then
+		return 0
+	end
+	
+	local count = 0
+	for _, child in ipairs(spawnVictims:GetChildren()) do
+		if child:IsA("BasePart") then
+			count = count + 1
+		end
+	end
+	
+	return count
+end
+
+-- ฟังก์ชันนับจำนวน victims ที่ถูกช่วยแล้ว (ถูกลบไปแล้ว)
+function VictimSpawner.getRescuedVictimCount()
+	local totalVictims = VictimSpawner.getTotalVictimCount()
+	local currentVictims = 0
+	
+	-- นับ victims ที่ยังอยู่ใน workspace
+	local victimFolder = Workspace:FindFirstChild("VictimFolders")
+	if victimFolder then
+		for _, victim in ipairs(victimFolder:GetChildren()) do
+			if victim:IsA("Model") and victim.Name:match("^Victim_") then
+				currentVictims = currentVictims + 1
+			end
+		end
+	end
+	
+	-- จำนวนที่ช่วยแล้ว = ทั้งหมด - ที่เหลืออยู่
+	return totalVictims - currentVictims
+end
+
 return VictimSpawner

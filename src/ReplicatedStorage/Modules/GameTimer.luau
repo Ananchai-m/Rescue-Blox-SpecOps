@@ -16,14 +16,9 @@ local player = Players.LocalPlayer
 local emitterAttributeName = "CoinEffectOriginalEnabled"
 local countdownSound = nil -- เก็บ Sound instance ของเสียงนับถอยหลัง
 
--- สร้าง RemoteEvent สำหรับ sync เสียงนับถอยหลัง
+-- RemoteEvent สำหรับ sync เสียงนับถอยหลัง (จะถูก setup จาก client script)
 local rescueRemotes = ReplicatedStorage:WaitForChild("RescueBotRemotes")
-local countdownSoundRemote = rescueRemotes:FindFirstChild("CountdownSound")
-if not countdownSoundRemote then
-	countdownSoundRemote = Instance.new("RemoteEvent")
-	countdownSoundRemote.Name = "CountdownSound"
-	countdownSoundRemote.Parent = rescueRemotes
-end
+local countdownSoundRemote = nil
 
 local function attachCoinEmitter(targetCoinFrame: Frame)
 	local effectsFolder = ReplicatedStorage:FindFirstChild("Effects")
@@ -515,41 +510,41 @@ function GameTimer.clearCoins()
 	end
 end
 
-return GameTimer
 
--- รับสัญญาณจาก Server เพื่อเล่นเสียงนับถอยหลังพร้อมกัน
-countdownSoundRemote.OnClientEvent:Connect(function(action)
-	if action == "start" then
-		-- ทุกคนจะเล่นเสียงพร้อมกันเมื่อได้รับสัญญาณจาก server
-		if timerGui and timerGui:FindFirstChild("TimerFrame") then
-			local timerFrame = timerGui.TimerFrame
-			local timerLabel = timerFrame:FindFirstChild("TimerLabel")
-			
-			if timerLabel then
-				-- หยุดเสียงเก่าถ้ามี
-				if countdownSound then
-					countdownSound:Stop()
-					countdownSound:Destroy()
-				end
-				
-				-- สร้างเสียงใหม่
-				countdownSound = Instance.new("Sound")
-				countdownSound.SoundId = "rbxassetid://74033679363032"
-				countdownSound.Volume = 0.1 -- เริ่มจากเสียงเบาๆ
-				countdownSound.Looped = true
-				countdownSound.Parent = timerLabel
-				countdownSound:Play()
-				
-				print("[GameTimer] Started countdown sound (synced)")
+-- ฟังก์ชันเริ่มเสียงนับถอยหลัง (เรียกจาก client script)
+function GameTimer.startCountdownSound()
+	if timerGui and timerGui:FindFirstChild("TimerFrame") then
+		local timerFrame = timerGui.TimerFrame
+		local timerLabel = timerFrame:FindFirstChild("TimerLabel")
+
+		if timerLabel then
+			-- หยุดเสียงเก่าถ้ามี
+			if countdownSound then
+				countdownSound:Stop()
+				countdownSound:Destroy()
 			end
-		end
-	elseif action == "stop" then
-		-- หยุดเสียงเมื่อได้รับสัญญาณจาก server
-		if countdownSound then
-			countdownSound:Stop()
-			countdownSound:Destroy()
-			countdownSound = nil
-			print("[GameTimer] Stopped countdown sound (synced)")
+
+			-- สร้างเสียงใหม่
+			countdownSound = Instance.new("Sound")
+			countdownSound.SoundId = "rbxassetid://74033679363032"
+			countdownSound.Volume = 0.1 -- เริ่มจากเสียงเบาๆ
+			countdownSound.Looped = true
+			countdownSound.Parent = timerLabel
+			countdownSound:Play()
+
+			print("[GameTimer] Started countdown sound (synced)")
 		end
 	end
-end)
+end
+
+-- ฟังก์ชันหยุดเสียงนับถอยหลัง (เรียกจาก client script)
+function GameTimer.stopCountdownSound()
+	if countdownSound then
+		countdownSound:Stop()
+		countdownSound:Destroy()
+		countdownSound = nil
+		print("[GameTimer] Stopped countdown sound (synced)")
+	end
+end
+
+return GameTimer

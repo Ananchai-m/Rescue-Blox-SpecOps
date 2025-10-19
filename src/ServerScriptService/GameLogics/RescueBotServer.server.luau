@@ -59,6 +59,22 @@ local GameConfig = require(ReplicatedStorage.Modules.GameConfig)
 local GameSummary = require(ReplicatedStorage.Modules.GameSummary)
 local RescueBotHealth = require(ReplicatedStorage.Modules.RescueBotHealth)
 
+-- Mission Result Handler (inline)
+local missionResultRemote = getOrCreateRemote("MissionResult")
+
+local function broadcastMissionResult(isSuccess)
+	local soundId = isSuccess and "1844584719" or "1846942471"
+	local message = isSuccess and "Mission Success" or "Mission Failed"
+
+	print(string.format("[MissionResultHandler] Broadcasting %s - Sound: %s - isSuccess: %s", message, soundId, tostring(isSuccess)))
+
+	-- Broadcast ให้ทุกคนในเกม
+	missionResultRemote:FireAllClients(isSuccess, soundId, message)
+
+	print("[MissionResultHandler] FireAllClients sent successfully")
+end
+
+
 local function toColor3(colorData)
 	if typeof(colorData) == "Color3" then
 		return colorData
@@ -1808,6 +1824,19 @@ local function endGame()
 
 	isGamePlaying = false
 
+	-- ตรวจสอบจำนวน victims ที่ช่วยได้
+	local totalVictims = VictimSpawner.getTotalVictimCount()
+	local rescuedVictims = VictimSpawner.getRescuedVictimCount()
+	local allRescued = (rescuedVictims >= totalVictims and totalVictims > 0)
+
+	print(string.format("[EndGame] Rescued: %d/%d - Success: %s", rescuedVictims, totalVictims, tostring(allRescued)))
+
+	-- Broadcast ผลการช่วยเหลือพร้อมเสียงให้ทุกคน
+	broadcastMissionResult(allRescued)
+
+	-- รอให้ client ได้รับข้อมูลก่อนแสดง Summary
+	task.wait(0.5)
+
 	-- แสดงสรุปผลเกม
 	print("Showing game summary...")
 	GameSummary.printStats() -- Debug stats
@@ -1848,7 +1877,9 @@ local function endGame()
 		end
 	end
 
-	GameSummary.showSummaryToAll()
+	-- ส่ง mission result ไปด้วยเพื่อให้ Server สามารถสร้าง UI ที่มีข้อความถูกต้อง
+	local missionResultMessage = allRescued and "Mission Success" or "Mission Failed"
+	GameSummary.showSummaryToAll(allRescued, missionResultMessage)
 
 	print("Server: Game ended - accepting new players")
 	waitingSystemRemote:FireAllClients("gameEnded")
