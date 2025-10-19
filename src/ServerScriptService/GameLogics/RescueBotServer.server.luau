@@ -51,7 +51,11 @@ local updateHPRemote = getOrCreateRemote("UpdateHP")
 local updateBatteryRemote = getOrCreateRemote("UpdateBattery")
 local debugModifyHPRemote = getOrCreateRemote("DebugModifyHP")
 local drillEffectRemote = getOrCreateRemote("DrillEffect")
+local deviceTypeRemote = getOrCreateRemote("DeviceType")
 local CompanionFollower = require(script.Parent:WaitForChild("CompanionFollower"))
+
+-- Track mobile players for physics optimization
+local mobilePlayersList = {}
 
 -- Import VictimSpawner, GameConfig, GameSummary, and RescueBotHealth
 local VictimSpawner = require(ReplicatedStorage.Modules.VictimSpawner)
@@ -1472,6 +1476,15 @@ local LIGHT_DEBRIS_PROPERTIES = PhysicalProperties.new(
 drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPartsData, rescuePosition, ejectStrength)
 	print("Server received drill complete from", player.Name, "for part:", partData.Name, "Strength:", ejectStrength or "normal")
 
+	-- Check if any mobile players are in the game for optimization
+	local hasMobilePlayers = false
+	for _, isMobile in pairs(mobilePlayersList) do
+		if isMobile then
+			hasMobilePlayers = true
+			break
+		end
+	end
+
 	-- หา part จริงใน workspace (ใช้ instance จาก client ถ้ามี)
 	local part = nil
 	if partData.Instance and partData.Instance:IsA("BasePart") and partData.Instance:IsDescendantOf(workspace) then
@@ -1495,6 +1508,21 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 
 	if #directChildren > 0 then
 		print(string.format("Breakable hierarchy detected - Main: %s | Nested parts: %d", part.Name, #directChildren))
+
+		-- Reduce debris count for mobile optimization (keep only 30% of parts)
+		if hasMobilePlayers and #directChildren > 3 then
+			local reducedCount = math.max(3, math.floor(#directChildren * 0.3))
+			local tempChildren = {}
+			for i = 1, reducedCount do
+				table.insert(tempChildren, directChildren[i])
+			end
+			-- Destroy the rest immediately
+			for i = reducedCount + 1, #directChildren do
+				directChildren[i]:Destroy()
+			end
+			directChildren = tempChildren
+			print(string.format("[Mobile Optimization] Reduced debris from %d to %d parts", #directChildren + (#tempChildren - reducedCount), #directChildren))
+		end
 
 		local Debris = game:GetService("Debris")
 
@@ -1563,6 +1591,17 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 			Position = part.Position,
 			Instance = part
 		})
+	end
+
+	-- Reduce connected parts for mobile optimization (keep only 30% of parts)
+	if hasMobilePlayers and #connectedPartsData > 3 then
+		local reducedCount = math.max(3, math.floor(#connectedPartsData * 0.3))
+		local tempConnected = {}
+		for i = 1, reducedCount do
+			table.insert(tempConnected, connectedPartsData[i])
+		end
+		connectedPartsData = tempConnected
+		print(string.format("[Mobile Optimization] Reduced connected parts to %d", #connectedPartsData))
 	end
 
 	-- Unanchor และเพิ่มแรงกระเด็นให้ part หลักและ connected parts
@@ -2041,6 +2080,17 @@ drillEffectRemote.OnServerEvent:Connect(function(player, action)
 			drillEffectRemote:FireClient(otherPlayer, player, action)
 		end
 	end
+end)
+
+-- Handle device type notification from clients
+deviceTypeRemote.OnServerEvent:Connect(function(player, isMobile)
+	mobilePlayersList[player.UserId] = isMobile
+	print(string.format("[DeviceType] Player %s is on %s", player.Name, isMobile and "Mobile" or "Desktop"))
+end)
+
+-- Clean up when player leaves
+Players.PlayerRemoving:Connect(function(player)
+	mobilePlayersList[player.UserId] = nil
 end)
 
 print("RescueBotServer loaded")

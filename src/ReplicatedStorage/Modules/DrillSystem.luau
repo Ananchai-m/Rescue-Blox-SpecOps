@@ -5,9 +5,18 @@ local DrillConfig = require(script.Parent.DrillConfig)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 local CoinEffect = require(script.Parent.CoinEffect)
 
 local DrillSystem = {}
+
+-- ตรวจสอบว่าเป็น Mobile หรือไม่
+local function isMobileDevice(): boolean
+	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+end
+
+local isMobile = isMobileDevice()
+local PARTICLE_RATE_MULTIPLIER = if isMobile then 0.3 else 1 -- ลด particles 70% บน Mobile
 
 -- Private variables
 local drillingTargets = {} -- เก็บข้อมูลการเจาะแต่ละ part
@@ -33,6 +42,14 @@ if not drillEffectRemote then
 	drillEffectRemote.Name = "DrillEffect"
 	drillEffectRemote.Parent = rescueRemotes
 end
+
+-- Notify server about device type for physics optimization
+local deviceTypeRemote = rescueRemotes:WaitForChild("DeviceType")
+task.spawn(function()
+	task.wait(1) -- Wait a bit for server to be ready
+	deviceTypeRemote:FireServer(isMobile)
+	print(string.format("[DeviceType] Notified server: %s", isMobile and "Mobile" or "Desktop"))
+end)
 
 -- UI Variables
 local drillGui = nil
@@ -516,6 +533,11 @@ local function enableDrillEffects()
 	if attachment1 then
 		for _, effect in ipairs(attachment1:GetChildren()) do
 			if effect:IsA("ParticleEmitter") then
+				-- Optimize สำหรับ Mobile
+				if isMobile and not effect:GetAttribute("OriginalRate") then
+					effect:SetAttribute("OriginalRate", effect.Rate)
+					effect.Rate = effect.Rate * PARTICLE_RATE_MULTIPLIER
+				end
 				effect.Enabled = true
 			end
 		end
@@ -526,6 +548,11 @@ local function enableDrillEffects()
 	if attachment2 then
 		for _, effect in ipairs(attachment2:GetChildren()) do
 			if effect:IsA("ParticleEmitter") then
+				-- Optimize สำหรับ Mobile
+				if isMobile and not effect:GetAttribute("OriginalRate") then
+					effect:SetAttribute("OriginalRate", effect.Rate)
+					effect.Rate = effect.Rate * PARTICLE_RATE_MULTIPLIER
+				end
 				effect.Enabled = true
 			end
 		end
@@ -944,6 +971,12 @@ drillEffectRemote.OnClientEvent:Connect(function(otherPlayer, action)
 		return
 	end
 
+	-- บน Mobile ปิด particle effects ของผู้เล่นอื่นเพื่อประหยัด performance
+	if isMobile then
+		print("[DrillSystem] Mobile device - skipping other players' drill effects for performance")
+		return
+	end
+
 	-- Find the other player's rescue bot
 	local rescueBotName = otherPlayer.Name .. "_Rescue"
 	local rescueBot = workspace:FindFirstChild(rescueBotName)
@@ -962,11 +995,16 @@ drillEffectRemote.OnClientEvent:Connect(function(otherPlayer, action)
 	end
 
 	if action == "start" then
-		-- Enable effects
+		-- Enable effects (ลด rate บน Mobile)
 		local attachment1 = head:FindFirstChild("AttachmentEffect1")
 		if attachment1 then
 			for _, effect in ipairs(attachment1:GetChildren()) do
 				if effect:IsA("ParticleEmitter") then
+					-- Optimize สำหรับ Mobile
+					if isMobile and not effect:GetAttribute("OriginalRate") then
+						effect:SetAttribute("OriginalRate", effect.Rate)
+						effect.Rate = effect.Rate * PARTICLE_RATE_MULTIPLIER
+					end
 					effect.Enabled = true
 				end
 			end
@@ -976,6 +1014,11 @@ drillEffectRemote.OnClientEvent:Connect(function(otherPlayer, action)
 		if attachment2 then
 			for _, effect in ipairs(attachment2:GetChildren()) do
 				if effect:IsA("ParticleEmitter") then
+					-- Optimize สำหรับ Mobile
+					if isMobile and not effect:GetAttribute("OriginalRate") then
+						effect:SetAttribute("OriginalRate", effect.Rate)
+						effect.Rate = effect.Rate * PARTICLE_RATE_MULTIPLIER
+					end
 					effect.Enabled = true
 				end
 			end
