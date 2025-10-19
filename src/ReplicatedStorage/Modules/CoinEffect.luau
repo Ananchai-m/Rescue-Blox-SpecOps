@@ -21,8 +21,8 @@ end
 local CONFIG = {
 	AnimationDuration = 0.8,
 	BounceDelay = 0.1,
-	ScatterRadius = 100, -- pixels
-	CoinSize = UDim2.new(0, 60, 0, 60),
+	ScatterRadius = 0.05, -- scale (5% of screen)
+	CoinSize = UDim2.fromScale(0.05, 0.05), -- 5% of screen size
 	RotationDegrees = 360,
 }
 
@@ -192,8 +192,8 @@ local function createCoinGui(parent: ScreenGui): GuiObject
 			templateCoin = coinFrame:Clone()
 			templateCoin.Name = "FlyingCoin"
 
-			-- Force absolute positioning for flying coins
-			templateCoin.Size = UDim2.new(0, 60, 0, 60) -- Fixed pixel size
+			-- Use scale for responsive sizing
+			templateCoin.Size = CONFIG.CoinSize
 		end
 	end
 
@@ -211,10 +211,16 @@ local function createCoinGui(parent: ScreenGui): GuiObject
 		corner.Parent = templateCoin
 	end
 
-	-- Always use center anchor and absolute positioning
+	-- Always use center anchor and scale positioning
 	templateCoin.AnchorPoint = Vector2.new(0.5, 0.5)
-	templateCoin.Position = UDim2.new(0, 0, 0, 0) -- Will be set by animation
+	templateCoin.Position = UDim2.fromScale(0, 0) -- Will be set by animation
 	templateCoin.ZIndex = 1000
+
+	-- Add UIAspectRatioConstraint to keep it square
+	local aspectRatio = Instance.new("UIAspectRatioConstraint")
+	aspectRatio.AspectRatio = 1 -- 1:1 ratio (square)
+	aspectRatio.Parent = templateCoin
+
 	templateCoin.Parent = parent
 
 	return templateCoin
@@ -253,13 +259,10 @@ local function animateCoinGui(
 		Enum.EasingDirection.Out
 	)
 
-	-- Calculate bounce position (slight upward movement)
-	local bounceOffset = UDim2.new(0, 0, 0, -50)
-	local bouncePos = UDim2.new(
+	-- Calculate bounce position (slight upward movement using scale)
+	local bouncePos = UDim2.fromScale(
 		startPos.X.Scale,
-		startPos.X.Offset,
-		startPos.Y.Scale,
-		startPos.Y.Offset - 50
+		startPos.Y.Scale - 0.05 -- Move up by 5% of screen height
 	)
 
 	local bounceTween = TweenService:Create(coinGui, bounceInfo, {
@@ -289,7 +292,7 @@ local function animateCoinGui(
 
 		local flyTween = TweenService:Create(coinGui, flyInfo, {
 			Position = targetPos,
-			Size = UDim2.new(0, 30, 0, 30) -- Shrink to match icon size
+			Size = UDim2.fromScale(0.025, 0.025) -- Shrink to 2.5% of screen (half of original)
 		})
 
 		flyTween:Play()
@@ -407,19 +410,20 @@ function CoinEffect.SpawnCoins(position: Vector3, amount: number, targetPlayer: 
 				targetCoinEmitter = coinFrame:FindFirstChild("Emitter")
 			end
 
-		-- Calculate absolute position of CoinIcon center
+		-- Calculate position of CoinIcon center using scale
 		local absPos = targetCoinIcon.AbsolutePosition
 		local absSize = targetCoinIcon.AbsoluteSize
-		targetPosition = UDim2.new(
-			0,
-			absPos.X + absSize.X / 2,
-			0,
-			absPos.Y + absSize.Y / 2
+		local viewportSize = camera.ViewportSize
+
+		-- Convert absolute position to scale
+		targetPosition = UDim2.fromScale(
+			(absPos.X + absSize.X / 2) / viewportSize.X,
+			(absPos.Y + absSize.Y / 2) / viewportSize.Y
 		)
 	else
 		-- Fallback to top-right corner
 		warn("CoinIcon not found, using default position")
-		targetPosition = UDim2.new(0.9, 0, 0.1, 0)
+		targetPosition = UDim2.fromScale(0.9, 0.1)
 	end
 
 	-- Get viewport size for random positioning
@@ -445,12 +449,11 @@ function CoinEffect.SpawnCoins(position: Vector3, amount: number, targetPlayer: 
 	for i = 1, amount do
 		local coin = createCoinGui(coinGui)
 
-		-- Random position across the screen (not from world position)
-		-- Spread coins randomly across viewport
-		local randomX = math.random(100, viewportSize.X - 100)
-		local randomY = math.random(100, viewportSize.Y - 100)
+		-- Random position across the screen using scale (10% to 90% of screen)
+		local randomX = math.random(10, 90) / 100
+		local randomY = math.random(10, 90) / 100
 
-		local startPosition = UDim2.new(0, randomX, 0, randomY)
+		local startPosition = UDim2.fromScale(randomX, randomY)
 
 		-- Animate with staggered delay (sequential)
 		local delay = (i - 1) * CONFIG.BounceDelay
