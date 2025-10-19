@@ -229,22 +229,97 @@ function stopRescueBotControl()
 	print("[MobileTouchControl] Stopped controlling RescueBot")
 end
 
--- Drag input handling
-local function handleTouchBegan(touch: InputObject)
-	if not isBotControlActive then return end
+-- ฟังก์ชันตรวจสอบว่า touch โดน Billboard หรือไม่
+local function isTouchOnBillboard(touchPos: Vector2): boolean
+	print("[MobileTouchControl] Checking touch at:", touchPos.X, touchPos.Y)
 
-	-- ตรวจสอบว่ามี RescueBillboard active อยู่หรือไม่ (อยู่ใน Workspace)
+	-- ตรวจสอบ RescueBillboard (Victim)
 	local victimFolder = workspace:FindFirstChild("VictimFolders")
 	if victimFolder then
 		for _, victim in ipairs(victimFolder:GetChildren()) do
 			local billboard = victim:FindFirstChild("RescueBillboard")
 			if billboard and billboard:IsA("BillboardGui") and billboard.Enabled then
-				print("[MobileTouchControl] Found active RescueBillboard, ignoring touch")
-				return
+				print("[MobileTouchControl] Found RescueBillboard on", victim.Name)
+				local mainFrame = billboard:FindFirstChild("MainFrame")
+				if mainFrame then
+					local framePos = mainFrame.AbsolutePosition
+					local frameSize = mainFrame.AbsoluteSize
+					print("[MobileTouchControl] Billboard pos:", framePos.X, framePos.Y, "size:", frameSize.X, frameSize.Y)
+					local inX = touchPos.X >= framePos.X and touchPos.X <= (framePos.X + frameSize.X)
+					local inY = touchPos.Y >= framePos.Y and touchPos.Y <= (framePos.Y + frameSize.Y)
+					print("[MobileTouchControl] inX:", inX, "inY:", inY)
+					if inX and inY then
+						print("[MobileTouchControl] HIT RescueBillboard!")
+						return true
+					end
+				end
 			end
 		end
 	end
 
+	print("[MobileTouchControl] No billboard hit, continuing to drag")
+
+	-- ตรวจสอบ ReviveBillboard (Downed RescueBot)
+	for _, model in ipairs(workspace:GetChildren()) do
+		if model:IsA("Model") and model.Name:match("_Rescue$") then
+			local billboard = model:FindFirstChild("ReviveBillboard")
+			if billboard and billboard:IsA("BillboardGui") and billboard.Enabled then
+				local mainFrame = billboard:FindFirstChild("MainFrame")
+				if mainFrame then
+					local framePos = mainFrame.AbsolutePosition
+					local frameSize = mainFrame.AbsoluteSize
+					local inX = touchPos.X >= framePos.X and touchPos.X <= (framePos.X + frameSize.X)
+					local inY = touchPos.Y >= framePos.Y and touchPos.Y <= (framePos.Y + frameSize.Y)
+					if inX and inY then
+						return true
+					end
+				end
+			end
+		end
+	end
+
+	return false
+end
+
+-- Drag input handling
+local function handleTouchBegan(touch: InputObject)
+	if not isBotControlActive then return end
+
+	local touchPos = Vector2.new(touch.Position.X, touch.Position.Y)
+
+	-- 1. ตรวจสอบว่า touch อยู่ใน DynamicThumbstickFrame หรือไม่
+	local isInThumbstick = false
+	local playerGui = player:FindFirstChild("PlayerGui")
+	if playerGui then
+		local touchGui = playerGui:FindFirstChild("TouchGui")
+		if touchGui then
+			local touchControlFrame = touchGui:FindFirstChild("TouchControlFrame")
+			if touchControlFrame then
+				local thumbstickFrame = touchControlFrame:FindFirstChild("DynamicThumbstickFrame")
+				if thumbstickFrame then
+					local framePos = thumbstickFrame.AbsolutePosition
+					local frameSize = thumbstickFrame.AbsoluteSize
+					local inX = touchPos.X >= framePos.X and touchPos.X <= (framePos.X + frameSize.X)
+					local inY = touchPos.Y >= framePos.Y and touchPos.Y <= (framePos.Y + frameSize.Y)
+					isInThumbstick = inX and inY
+				end
+			end
+		end
+	end
+
+	-- 2. ถ้าไม่อยู่ใน Thumbstick → ไม่ทำ Drag control (แต่ไม่ return เพื่อให้ระบบอื่นทำงานได้)
+	if not isInThumbstick then
+		print("[MobileTouchControl] Touch outside Thumbstick, skipping drag control")
+		return
+	end
+
+	-- 3. ถ้าอยู่ใน Thumbstick แต่โดน Billboard → ให้ Rescue/Revive System จัดการ
+	if isTouchOnBillboard(touchPos) then
+		print("[MobileTouchControl] Touch hit Billboard in Thumbstick area, ignoring for rescue system")
+		return
+	end
+
+	-- 4. ถ้าถึงจุดนี้ = touch อยู่ใน Thumbstick และไม่โดน Billboard → ทำ Drag control
 	-- บันทึกจุดเริ่มต้นของการลาก
 	touchActive = true
 	touchStartPosition = Vector2.new(touch.Position.X, touch.Position.Y)
@@ -305,16 +380,11 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
 
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		-- ตรวจสอบว่ามี RescueBillboard active อยู่หรือไม่ (อยู่ใน Workspace)
-		local victimFolder = workspace:FindFirstChild("VictimFolders")
-		if victimFolder then
-			for _, victim in ipairs(victimFolder:GetChildren()) do
-				local billboard = victim:FindFirstChild("RescueBillboard")
-				if billboard and billboard:IsA("BillboardGui") and billboard.Enabled then
-					print("[MobileTouchControl] Found active RescueBillboard, ignoring mouse")
-					return
-				end
-			end
+		-- ตรวจสอบว่า mouse โดน Billboard หรือไม่
+		local mousePos = UserInputService:GetMouseLocation()
+		if isTouchOnBillboard(mousePos) then
+			print("[MobileTouchControl] Mouse hit Billboard, ignoring")
+			return
 		end
 	end
 

@@ -58,6 +58,10 @@ local function createBillboard(downedBot: Model): (BillboardGui?, Frame?)
 	billboard.Size = UDim2.new(4, 0, 2, 0)
 	billboard.StudsOffset = Vector3.new(0, 3, 0)
 	billboard.Adornee = downedBot.PrimaryPart
+	billboard.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	billboard.ClipsDescendants = false
+	billboard.Enabled = true
+	billboard.Active = true
 	billboard.Parent = downedBot
 
 	-- Main frame (ทำเป็น TextButton เพื่อให้กดได้)
@@ -70,20 +74,80 @@ local function createBillboard(downedBot: Model): (BillboardGui?, Frame?)
 	mainFrame.BorderSizePixel = 0
 	mainFrame.Text = ""
 	mainFrame.AutoButtonColor = false
+	mainFrame.Active = true
+	mainFrame.Selectable = true
+	mainFrame.Modal = false
+	mainFrame.ZIndex = 10
 	mainFrame.Parent = billboard
 
-	-- เชื่อมการกดปุ่มกับการ Revive
-	mainFrame.MouseButton1Down:Connect(function()
-		if nearestDownedBot == downedBot and not isReviving then
-			startRevive()
+	-- ตัวแปรสำหรับติดตาม input state
+	local isHolding = false
+
+	-- ฟังก์ชันตรวจสอบว่า input อยู่นอก Thumbstick และมี Billboard แสดง
+	local function canRevive(inputPosition: Vector2): boolean
+		-- ตรวจสอบว่า input อยู่ใน Thumbstick หรือไม่
+		local playerGui = player:FindFirstChild("PlayerGui")
+		if playerGui then
+			local touchGui = playerGui:FindFirstChild("TouchGui")
+			if touchGui then
+				local touchControlFrame = touchGui:FindFirstChild("TouchControlFrame")
+				if touchControlFrame then
+					local thumbstickFrame = touchControlFrame:FindFirstChild("DynamicThumbstickFrame")
+					if thumbstickFrame then
+						local framePos = thumbstickFrame.AbsolutePosition
+						local frameSize = thumbstickFrame.AbsoluteSize
+						local inX = inputPosition.X >= framePos.X and inputPosition.X <= (framePos.X + frameSize.X)
+						local inY = inputPosition.Y >= framePos.Y and inputPosition.Y <= (framePos.Y + frameSize.Y)
+
+						if inX and inY then
+							-- อยู่ใน Thumbstick → ไม่ให้ revive
+							return false
+						end
+					end
+				end
+			end
+		end
+
+		-- ไม่อยู่ใน Thumbstick → ตรวจสอบว่ามี Billboard และอยู่ในระยะหรือไม่
+		if not billboard or not billboard.Enabled then return false end
+		if not nearestDownedBot or nearestDownedBot ~= downedBot then return false end
+
+		-- ตรวจสอบว่า downedBot อยู่ในระยะหรือไม่
+		local myBot = Workspace:FindFirstChild(player.Name .. "_Rescue")
+		if myBot and myBot.PrimaryPart and downedBot.PrimaryPart then
+			local distance = (myBot.PrimaryPart.Position - downedBot.PrimaryPart.Position).Magnitude
+			return distance <= REVIVE_DISTANCE
+		end
+
+		return false
+	end
+
+	-- ใช้ UserInputService เพื่อจับ input เมื่อมี Billboard แสดง
+	-- (BillboardGui ไม่สามารถรับ input events ได้โดยตรง)
+	local uisConnection1, uisConnection2
+
+	uisConnection1 = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			local inputPos = Vector2.new(input.Position.X, input.Position.Y)
+			if canRevive(inputPos) then
+				if nearestDownedBot == downedBot and not isReviving and not isHolding then
+					isHolding = true
+					startRevive()
+				end
+			end
 		end
 	end)
 
-	mainFrame.MouseButton1Up:Connect(function()
-		if isReviving then
-			local elapsed = tick() - holdStartTime
-			local completed = elapsed >= HOLD_DURATION
-			stopRevive(completed)
+	uisConnection2 = UserInputService.InputEnded:Connect(function(input, gameProcessed)
+		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			if isHolding then
+				isHolding = false
+				if isReviving then
+					local elapsed = tick() - holdStartTime
+					local completed = elapsed >= HOLD_DURATION
+					stopRevive(completed)
+				end
+			end
 		end
 	end)
 

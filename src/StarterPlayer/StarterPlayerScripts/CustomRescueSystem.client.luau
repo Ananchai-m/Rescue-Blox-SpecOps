@@ -96,85 +96,76 @@ local function createVictimBillboard(victim)
 	-- ตัวแปรสำหรับติดตาม input state
 	local isHolding = false
 
-	print("[CustomRescueSystem] Setting up input event listeners...")
+	-- ฟังก์ชันตรวจสอบว่า input อยู่นอก Thumbstick และมี Billboard แสดง
+	local function canRescue(inputPosition: Vector2): boolean
+		-- ตรวจสอบว่า input อยู่ใน Thumbstick หรือไม่
+		local playerGui = player:FindFirstChild("PlayerGui")
+		if playerGui then
+			local touchGui = playerGui:FindFirstChild("TouchGui")
+			if touchGui then
+				local touchControlFrame = touchGui:FindFirstChild("TouchControlFrame")
+				if touchControlFrame then
+					local thumbstickFrame = touchControlFrame:FindFirstChild("DynamicThumbstickFrame")
+					if thumbstickFrame then
+						local framePos = thumbstickFrame.AbsolutePosition
+						local frameSize = thumbstickFrame.AbsoluteSize
+						local inX = inputPosition.X >= framePos.X and inputPosition.X <= (framePos.X + frameSize.X)
+						local inY = inputPosition.Y >= framePos.Y and inputPosition.Y <= (framePos.Y + frameSize.Y)
 
-	-- TEST: ใช้ UserInputService แทน
+						if inX and inY then
+							-- อยู่ใน Thumbstick → ไม่ให้ rescue
+							return false
+						end
+					end
+				end
+			end
+		end
+
+		-- ไม่อยู่ใน Thumbstick → ตรวจสอบว่ามี Billboard และอยู่ในระยะหรือไม่
+		if not victimBillboard or not victimBillboard.Enabled then return false end
+		if not nearestVictim or nearestVictim ~= victim then return false end
+
+		-- ตรวจสอบว่า victim อยู่ในระยะหรือไม่
+		local character = player.Character
+		local myBot = workspace:FindFirstChild(player.Name .. "_Rescue")
+		local searchPosition = nil
+
+		if myBot and myBot.PrimaryPart then
+			searchPosition = myBot.PrimaryPart.Position
+		elseif character and character:FindFirstChild("HumanoidRootPart") then
+			searchPosition = character.HumanoidRootPart.Position
+		end
+
+		if searchPosition and victim:FindFirstChild("HumanoidRootPart") then
+			local distance = (searchPosition - victim.HumanoidRootPart.Position).Magnitude
+			return distance <= RESCUE_DISTANCE
+		end
+
+		return false
+	end
+
+	-- ใช้ UserInputService เพื่อจับ input เมื่อมี Billboard แสดง
+	-- (BillboardGui ไม่สามารถรับ input events ได้โดยตรง)
 	local uisConnection1, uisConnection2
 
 	uisConnection1 = UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		-- ไม่สนใจ gameProcessed เพราะต้องการดัก input ทั้งหมด
-		print("[CustomRescueSystem] UIS InputBegan:", input.UserInputType.Name, "gameProcessed:", gameProcessed)
-
 		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-			if nearestVictim == victim and not isRescuing and not isHolding then
-				isHolding = true
-				startRescue()
-				print("[CustomRescueSystem] Started rescue via UIS", input.UserInputType.Name)
-			end
-		end
-	end)
-
-	uisConnection2 = UserInputService.InputEnded:Connect(function(input, gameProcessed)
-		print("[CustomRescueSystem] UIS InputEnded:", input.UserInputType.Name, "gameProcessed:", gameProcessed)
-
-		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-			if isHolding then
-				isHolding = false
-				if isRescuing then
-					stopRescue()
-					print("[CustomRescueSystem] Stopped rescue via UIS", input.UserInputType.Name)
+			local inputPos = Vector2.new(input.Position.X, input.Position.Y)
+			if canRescue(inputPos) then
+				if nearestVictim == victim and not isRescuing and not isHolding then
+					isHolding = true
+					startRescue()
 				end
 			end
 		end
 	end)
 
-	-- DEBUG: Log all inputs on mainFrame (อาจจะไม่ทำงานเพราะ BillboardGui limitation)
-	mainFrame.InputBegan:Connect(function(input)
-		print("[CustomRescueSystem] MainFrame InputBegan detected:", input.UserInputType.Name, "- nearestVictim:", nearestVictim and nearestVictim.Name or "nil", "- isRescuing:", isRescuing, "- isHolding:", isHolding)
-	end)
-
-	mainFrame.InputEnded:Connect(function(input)
-		print("[CustomRescueSystem] InputEnded detected:", input.UserInputType.Name, "- isHolding:", isHolding, "- isRescuing:", isRescuing)
-	end)
-
-	mainFrame.InputChanged:Connect(function(input)
-		print("[CustomRescueSystem] InputChanged detected:", input.UserInputType.Name, "- Delta:", input.Delta)
-	end)
-
-	mainFrame.MouseButton1Down:Connect(function()
-		print("[CustomRescueSystem] MouseButton1Down event fired")
-	end)
-
-	mainFrame.MouseButton1Up:Connect(function()
-		print("[CustomRescueSystem] MouseButton1Up event fired")
-	end)
-
-	mainFrame.TouchTap:Connect(function()
-		print("[CustomRescueSystem] TouchTap event fired")
-	end)
-
-	mainFrame.TouchLongPress:Connect(function()
-		print("[CustomRescueSystem] TouchLongPress event fired")
-	end)
-
-	-- รองรับ Touch Input สำหรับ Mobile และ Mouse สำหรับ PC
-	mainFrame.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-			if nearestVictim == victim and not isRescuing and not isHolding then
-				isHolding = true
-				startRescue()
-				print("[CustomRescueSystem] Started rescue via", input.UserInputType.Name)
-			end
-		end
-	end)
-
-	mainFrame.InputEnded:Connect(function(input)
+	uisConnection2 = UserInputService.InputEnded:Connect(function(input, gameProcessed)
 		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
 			if isHolding then
 				isHolding = false
 				if isRescuing then
 					stopRescue()
-					print("[CustomRescueSystem] Stopped rescue via", input.UserInputType.Name)
 				end
 			end
 		end
