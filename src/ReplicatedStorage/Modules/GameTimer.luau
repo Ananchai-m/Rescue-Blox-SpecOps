@@ -3,6 +3,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 local GameConfig = require(ReplicatedStorage.Modules.GameConfig)
 
 local GameTimer = {}
@@ -13,6 +14,16 @@ local timerConnection = nil
 local timerThread = nil
 local player = Players.LocalPlayer
 local emitterAttributeName = "CoinEffectOriginalEnabled"
+local countdownSound = nil -- เก็บ Sound instance ของเสียงนับถอยหลัง
+
+-- สร้าง RemoteEvent สำหรับ sync เสียงนับถอยหลัง
+local rescueRemotes = ReplicatedStorage:WaitForChild("RescueBotRemotes")
+local countdownSoundRemote = rescueRemotes:FindFirstChild("CountdownSound")
+if not countdownSoundRemote then
+	countdownSoundRemote = Instance.new("RemoteEvent")
+	countdownSoundRemote.Name = "CountdownSound"
+	countdownSoundRemote.Parent = rescueRemotes
+end
 
 local function attachCoinEmitter(targetCoinFrame: Frame)
 	local effectsFolder = ReplicatedStorage:FindFirstChild("Effects")
@@ -102,7 +113,8 @@ function GameTimer.createTimerGui()
 	local timerLabel = Instance.new("TextLabel")
 	timerLabel.Name = "TimerLabel"
 	timerLabel.Size = UDim2.new(1, 0, 1, 0)
-	timerLabel.Position = UDim2.new(0, 0, 0, 0)
+	timerLabel.Position = UDim2.new(0.5, 0, 0.5, 0)
+	timerLabel.AnchorPoint = Vector2.new(0.5, 0.5) -- Scale จากจุดกลาง
 	timerLabel.BackgroundTransparency = 1
 	timerLabel.Text = "05:00"
 	timerLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -175,6 +187,12 @@ function GameTimer.startCountdown(duration)
 
 	local timeLeft = duration
 
+	-- สร้าง UIScale สำหรับแอนิเมชัน
+	local timerScale = Instance.new("UIScale")
+	timerScale.Name = "TimerScale"
+	timerScale.Scale = 1
+	timerScale.Parent = timerLabel
+
 	-- เริ่ม timer
 	timerThread = task.spawn(function()
 		while timeLeft > 0 and timerGui and timerGui.Parent do
@@ -183,11 +201,119 @@ function GameTimer.startCountdown(duration)
 			local seconds = timeLeft % 60
 			timerLabel.Text = string.format("%02d:%02d", minutes, seconds)
 
-			-- เปลี่ยนสีเมื่อเวลาเหลือน้อย
+			-- เปลี่ยนสีและเพิ่มเอฟเฟกต์เมื่อเวลาเหลือน้อย
 			if timeLeft <= 60 then
 				timerLabel.TextColor3 = Color3.fromRGB(255, 100, 100) -- แดง
+
+				-- เล่นเสียงนับถอยหลังเมื่อเหลือ 60 วินาทีลงไป
+				if timeLeft == 60 then
+					-- สร้างเสียงนับถอยหลัง
+					if countdownSound then
+						countdownSound:Stop()
+						countdownSound:Destroy()
+					end
+
+					countdownSound = Instance.new("Sound")
+					countdownSound.SoundId = "rbxassetid://74033679363032"
+					countdownSound.Volume = 0.1 -- เริ่มจากเสียงเบาๆ
+					countdownSound.Looped = true
+					countdownSound.Parent = timerLabel
+					countdownSound:Play()
+
+					print("[GameTimer] Started countdown sound")
+				end
+
+				-- ค่อยๆ เพิ่มความดังของเสียงตามเวลาที่เหลือ
+				if countdownSound and countdownSound.IsPlaying then
+					-- คำนวณ volume ตามเวลา: 60s = 0.1, 30s = 0.35, 10s = 0.6, 1s = 0.8
+					local progress = (60 - timeLeft) / 60 -- 0 ถึง 1
+					local targetVolume = 0.1 + (progress * 0.7) -- 0.1 ถึง 0.8
+
+					-- ตั้งค่า volume โดยตรงให้ดังขึ้นเรื่อยๆ
+					countdownSound.Volume = targetVolume
+				end
+
+				-- แอนิเมชัน scale แบบตื่นเต้นเมื่อเหลือ 10 วินาทีสุดท้าย
+				if timeLeft <= 10 then
+					-- Scale ขึ้น-ลงแบบรวดเร็ว
+					local scaleUp = TweenService:Create(timerScale,
+						TweenInfo.new(0.3, Enum.EasingStyle.Bounce, Enum.EasingDirection.Out),
+						{Scale = 1.4}
+					)
+					local scaleDown = TweenService:Create(timerScale,
+						TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+						{Scale = 1}
+					)
+
+					scaleUp:Play()
+					scaleUp.Completed:Connect(function()
+						scaleDown:Play()
+					end)
+
+					-- สั่นกรอบเล็กน้อย
+					local mainFrame = timerLabel.Parent
+					if mainFrame then
+						local originalPos = mainFrame.Position
+
+						-- สั่น 3 ครั้ง
+						for i = 1, 3 do
+							task.spawn(function()
+								local offset = i * 0.1
+								local shakeRight = TweenService:Create(mainFrame,
+									TweenInfo.new(0.05, Enum.EasingStyle.Linear),
+									{Position = UDim2.new(originalPos.X.Scale + 0.005, 0, originalPos.Y.Scale, 0)}
+								)
+								local shakeLeft = TweenService:Create(mainFrame,
+									TweenInfo.new(0.05, Enum.EasingStyle.Linear),
+									{Position = UDim2.new(originalPos.X.Scale - 0.005, 0, originalPos.Y.Scale, 0)}
+								)
+								local shakeBack = TweenService:Create(mainFrame,
+									TweenInfo.new(0.05, Enum.EasingStyle.Linear),
+									{Position = originalPos}
+								)
+
+								task.wait(offset)
+								shakeRight:Play()
+								shakeRight.Completed:Wait()
+								shakeLeft:Play()
+								shakeLeft.Completed:Wait()
+								shakeBack:Play()
+							end)
+						end
+					end
+				elseif timeLeft <= 30 then
+					-- Scale แบบปกติเมื่อเหลือ 30 วินาทีลงไป
+					local scaleUp = TweenService:Create(timerScale,
+						TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+						{Scale = 1.2}
+					)
+					local scaleDown = TweenService:Create(timerScale,
+						TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+						{Scale = 1}
+					)
+
+					scaleUp:Play()
+					scaleUp.Completed:Connect(function()
+						scaleDown:Play()
+					end)
+				end
 			elseif timeLeft <= 120 then
 				timerLabel.TextColor3 = Color3.fromRGB(255, 255, 100) -- เหลือง
+
+				-- Scale เล็กน้อยเมื่อเหลือ 2 นาที
+				local scaleUp = TweenService:Create(timerScale,
+					TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+					{Scale = 1.1}
+				)
+				local scaleDown = TweenService:Create(timerScale,
+					TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+					{Scale = 1}
+				)
+
+				scaleUp:Play()
+				scaleUp.Completed:Connect(function()
+					scaleDown:Play()
+				end)
 			else
 				timerLabel.TextColor3 = Color3.fromRGB(255, 255, 255) -- ขาว
 			end
@@ -200,6 +326,14 @@ function GameTimer.startCountdown(duration)
 		if timerGui and timerGui.Parent then
 			timerLabel.Text = "00:00"
 			timerLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
+
+			-- หยุดเสียงนับถอยหลัง
+			if countdownSound then
+				countdownSound:Stop()
+				countdownSound:Destroy()
+				countdownSound = nil
+				print("[GameTimer] Countdown sound stopped")
+			end
 
 			print("Game timer finished!")
 
@@ -233,6 +367,13 @@ function GameTimer.stopTimer()
 	if timerThread then
 		task.cancel(timerThread)
 		timerThread = nil
+	end
+
+	-- หยุดและลบเสียงนับถอยหลัง
+	if countdownSound then
+		countdownSound:Stop()
+		countdownSound:Destroy()
+		countdownSound = nil
 	end
 
 	if timerGui then

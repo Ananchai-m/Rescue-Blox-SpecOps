@@ -110,7 +110,7 @@ GameConfig.UI = {
 	notificationDuration = 0.5,
 	cornerRadius = UDim.new(0.01, 0), -- Scale-based corner radius
 	smallCornerRadius = UDim.new(0.1, 0), -- Scale-based small corner radius
-	mapSelectioCornerRadius = UDim.new(0.05, 0) 
+	mapSelectioCornerRadius = UDim.new(0.05, 0)
 }
 
 -- Debug Settings
