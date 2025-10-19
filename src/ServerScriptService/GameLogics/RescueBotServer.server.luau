@@ -2082,6 +2082,18 @@ drillEffectRemote.OnServerEvent:Connect(function(player, action)
 	end
 end)
 
+-- Handle drill sound broadcasting
+local drillSoundRemote = getOrCreateRemote("DrillSound")
+drillSoundRemote.OnServerEvent:Connect(function(player, action)
+	-- Broadcast to all other players
+	for _, otherPlayer in ipairs(Players:GetPlayers()) do
+		if otherPlayer ~= player then
+			drillSoundRemote:FireClient(otherPlayer, player, action)
+		end
+	end
+	print(string.format("[DrillSound] Broadcasting %s from %s to all players", action, player.Name))
+end)
+
 -- Handle device type notification from clients
 deviceTypeRemote.OnServerEvent:Connect(function(player, isMobile)
 	mobilePlayersList[player.UserId] = isMobile

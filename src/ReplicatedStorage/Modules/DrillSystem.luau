@@ -43,6 +43,14 @@ if not drillEffectRemote then
 	drillEffectRemote.Parent = rescueRemotes
 end
 
+-- Create or get drill sound remote
+local drillSoundRemote = rescueRemotes:FindFirstChild("DrillSound")
+if not drillSoundRemote then
+	drillSoundRemote = Instance.new("RemoteEvent")
+	drillSoundRemote.Name = "DrillSound"
+	drillSoundRemote.Parent = rescueRemotes
+end
+
 -- Notify server about device type for physics optimization
 local deviceTypeRemote = rescueRemotes:WaitForChild("DeviceType")
 task.spawn(function()
@@ -626,6 +634,9 @@ local function fadeDrillSound()
 			currentDrillSound = nil
 		end
 		isFadingOut = false
+
+		-- ส่งสัญญาณหยุดเสียงเจาะไปยัง server
+		drillSoundRemote:FireServer("stop")
 	end)
 end
 
@@ -645,6 +656,15 @@ if playerGui then
 			isSummaryOpen = true
 			canDrill = false
 			destroyDrillGui()
+
+			-- หยุดเสียงเจาะเมื่อเกมจบ
+			if currentDrillSound then
+				currentDrillSound:Stop()
+				currentDrillSound:Destroy()
+				currentDrillSound = nil
+				drillSoundRemote:FireServer("stop")
+			end
+			isFadingOut = false
 		end
 	end)
 
@@ -820,6 +840,9 @@ function DrillSystem.handleDrillingClick(clickPosition)
 			currentDrillSound.Looped = true -- ทำให้เสียงวนลูป
 			currentDrillSound.Parent = drillArmPart
 			currentDrillSound:Play()
+
+			-- ส่งสัญญาณเสียงเจาะไปยัง server
+			drillSoundRemote:FireServer("start")
 		elseif currentDrillSound and isFadingOut then
 			-- ถ้ากำลัง fade out อยู่ ให้ฟื้นฟู volume
 			isFadingOut = false
@@ -896,6 +919,8 @@ function DrillSystem.setDrillEnabled(isEnabled: boolean)
 			currentDrillSound:Stop()
 			currentDrillSound:Destroy()
 			currentDrillSound = nil
+			-- ส่งสัญญาณหยุดเสียงไปยัง server
+			drillSoundRemote:FireServer("stop")
 		end
 		isFadingOut = false
 	end
@@ -951,6 +976,15 @@ player.CharacterAdded:Connect(function(newCharacter)
 	drillingTargets = {}
 	currentDrillingPart = nil
 	hideDrillProgress()
+
+	-- หยุดเสียงเจาะถ้ามี
+	if currentDrillSound then
+		currentDrillSound:Stop()
+		currentDrillSound:Destroy()
+		currentDrillSound = nil
+		drillSoundRemote:FireServer("stop")
+	end
+	isFadingOut = false
 end)
 
 -- Listen for drill complete events from server (for coin effects)
@@ -1042,6 +1076,90 @@ drillEffectRemote.OnClientEvent:Connect(function(otherPlayer, action)
 				end
 			end
 		end
+	end
+end)
+
+-- Track other players' drill sounds
+local otherPlayersDrillSounds = {}
+
+-- Handle drill sound from other players
+drillSoundRemote.OnClientEvent:Connect(function(otherPlayer, action)
+	-- Don't apply sound to self (already handled locally)
+	if otherPlayer == player then
+		return
+	end
+
+	-- Find the other player's rescue bot
+	local rescueBotName = otherPlayer.Name .. "_Rescue"
+	local rescueBot = workspace:FindFirstChild(rescueBotName)
+	if not rescueBot then
+		return
+	end
+
+	local drillArm = rescueBot:FindFirstChild("DrillArm")
+	if not drillArm or not drillArm.PrimaryPart then
+		return
+	end
+
+	local drillArmPart = drillArm.PrimaryPart
+	local playerKey = otherPlayer.UserId
+
+	if action == "start" then
+		-- Stop and remove old sound if exists
+		if otherPlayersDrillSounds[playerKey] then
+			otherPlayersDrillSounds[playerKey]:Stop()
+			otherPlayersDrillSounds[playerKey]:Destroy()
+			otherPlayersDrillSounds[playerKey] = nil
+		end
+
+		-- Create and play drill sound
+		local drillSound = Instance.new("Sound")
+		drillSound.SoundId = "rbxassetid://9118907884"
+		drillSound.Volume = 0.8 -- ลดเสียงของผู้เล่นอื่นนิดหน่อย
+		drillSound.Looped = true
+		drillSound.Parent = drillArmPart
+		drillSound:Play()
+
+		otherPlayersDrillSounds[playerKey] = drillSound
+		print(string.format("[DrillSound] Started drill sound for %s", otherPlayer.Name))
+
+	elseif action == "stop" then
+		-- Fade out and stop sound
+		if otherPlayersDrillSounds[playerKey] then
+			local sound = otherPlayersDrillSounds[playerKey]
+			local startVolume = sound.Volume
+			local fadeTime = 0.3
+			local steps = 10
+			local stepTime = fadeTime / steps
+			local volumeDecrement = startVolume / steps
+
+			task.spawn(function()
+				for i = 1, steps do
+					if not sound or not sound.Parent then
+						break
+					end
+					sound.Volume = math.max(0, sound.Volume - volumeDecrement)
+					task.wait(stepTime)
+				end
+
+				if sound then
+					sound:Stop()
+					sound:Destroy()
+				end
+				otherPlayersDrillSounds[playerKey] = nil
+				print(string.format("[DrillSound] Stopped drill sound for %s", otherPlayer.Name))
+			end)
+		end
+	end
+end)
+
+-- Clean up sounds when player leaves
+Players.PlayerRemoving:Connect(function(leavingPlayer)
+	local playerKey = leavingPlayer.UserId
+	if otherPlayersDrillSounds[playerKey] then
+		otherPlayersDrillSounds[playerKey]:Stop()
+		otherPlayersDrillSounds[playerKey]:Destroy()
+		otherPlayersDrillSounds[playerKey] = nil
 	end
 end)
 
