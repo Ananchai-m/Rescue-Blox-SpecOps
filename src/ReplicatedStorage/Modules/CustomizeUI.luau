@@ -1980,6 +1980,39 @@ local function createCustomizeUI()
 	inventoryConstraint.MinTextSize = 16
 	inventoryConstraint.Parent = inventoryLabel
 
+	-- Close Button
+	local closeButton = Instance.new("TextButton")
+	closeButton.Name = "CloseButton"
+	closeButton.Size = UDim2.fromScale(0.05, 0.8)
+	closeButton.Position = UDim2.fromScale(0.98, 0.5)
+	closeButton.AnchorPoint = Vector2.new(1, 0.5)
+	closeButton.BackgroundColor3 = Color3.fromRGB(205, 85, 85)
+	closeButton.BackgroundTransparency = 0.15
+	closeButton.BorderSizePixel = 0
+	closeButton.Font = Enum.Font.GothamBold
+	closeButton.Text = "X"
+	closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+	closeButton.TextScaled = true
+	closeButton.ZIndex = inventoryHeader.ZIndex + 1
+	closeButton.Parent = inventoryHeader
+
+	local closeButtonCorner = Instance.new("UICorner")
+	closeButtonCorner.CornerRadius = UDim.new(0.2, 0)
+	closeButtonCorner.Parent = closeButton
+
+	local closeButtonConstraint = Instance.new("UITextSizeConstraint")
+	closeButtonConstraint.MaxTextSize = 20
+	closeButtonConstraint.MinTextSize = 12
+	closeButtonConstraint.Parent = closeButton
+
+	local closeButtonAspect = Instance.new("UIAspectRatioConstraint")
+	closeButtonAspect.AspectRatio = 1
+	closeButtonAspect.Parent = closeButton
+
+	closeButton.MouseButton1Click:Connect(function()
+		CustomizeUI.closeCustomize()
+	end)
+
 	local slotsContainer = Instance.new("Frame")
 	slotsContainer.Name = "Slots"
 	slotsContainer.Size = UDim2.fromScale(0.95, 0.9)
