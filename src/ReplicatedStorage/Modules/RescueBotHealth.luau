@@ -316,18 +316,30 @@ end
 
 -- เริ่ม Battery Drain
 function RescueBotHealth:_startBatteryDrain()
-	local botSettings = GameConfig.getRescueBotSettings()
+	local typedSelf = self :: RescueBotHealthType
 
-	self._batteryDrainConnection = RunService.Heartbeat:Connect(function(deltaTime)
-		-- Idle drain
-		self:DrainBattery(botSettings.batteryDrain.idle * deltaTime)
+	-- ดึงข้อมูล player count และคำนวณ battery drain rate
+	local playerCount = #Players:GetPlayers()
+
+	-- เช็คว่ามี SolarCell ติดตั้งหรือไม่
+	local hasSolarCell = typedSelf.rescueModel:FindFirstChild("SolarCell", true) ~= nil
+
+	-- คำนวณ battery drain rates สำหรับโหมดปัจจุบัน
+	local drainRates = GameConfig.getBatteryDrainForMode(playerCount, hasSolarCell)
+
+	print(string.format("[RescueBotHealth] Battery drain rates for %d players (SolarCell: %s): Idle=%.3f/s, Moving=%.3f/s, Drilling=%.3f/s",
+		playerCount, tostring(hasSolarCell), drainRates.idle, drainRates.moving, drainRates.drilling))
+
+	typedSelf._batteryDrainConnection = RunService.Heartbeat:Connect(function(deltaTime)
+		-- Idle drain (ใช้ตลอดเวลา)
+		typedSelf:DrainBattery(drainRates.idle * deltaTime)
 
 		-- TODO: เพิ่มการตรวจสอบสถานะ moving และ drilling
 		-- if isMoving then
-		--     self:DrainBattery(botSettings.batteryDrain.moving * deltaTime)
+		--     self:DrainBattery(drainRates.moving * deltaTime)
 		-- end
 		-- if isDrilling then
-		--     self:DrainBattery(botSettings.batteryDrain.drilling * deltaTime)
+		--     self:DrainBattery(drainRates.drilling * deltaTime)
 		-- end
 	end)
 end

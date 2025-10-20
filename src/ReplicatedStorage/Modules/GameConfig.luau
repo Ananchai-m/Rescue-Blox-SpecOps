@@ -117,9 +117,13 @@ GameConfig.RESCUE_BOT = {
 		heavyCollision = 15    -- ชนแรงๆ ความเร็วสูง (ตายใน 6-7 ครั้ง)
 	},
 	batteryDrain = {
-		idle = 0.05,          -- ต่อวินาทีตอนไม่ทำอะไร
-		moving = 0.2,         -- ต่อวินาทีตอนเคลื่อนที่
-		drilling = 0.5        -- ต่อวินาทีตอนเจาะ
+		-- Base rates (will be scaled by calculateBatteryDrain function)
+		-- เหล่านี้คือค่าพื้นฐานที่จะถูกคูณด้วย multiplier จาก game duration
+		idleMultiplier = 0.3,       -- Multiplier สำหรับ idle (ต่ำที่สุด)
+		movingMultiplier = 1.0,     -- Multiplier สำหรับ moving (ปานกลาง)
+		drillingMultiplier = 2.5,   -- Multiplier สำหรับ drilling (สูงสุด)
+		-- Target: ใช้ Battery ประมาณ 70-80% ของเวลาเกมถ้าเล่นแบบ active
+		baseRatePerSecond = 1.0     -- อัตราพื้นฐานที่จะคำนวณจากเวลาเกม
 	},
 	regeneration = {
 		hpPerSecond = 0,      -- ไม่ฟื้นเลือด
@@ -277,6 +281,60 @@ function GameConfig.validate()
 	end
 
 	return #errors == 0, errors
+end
+
+-- Get game mode settings based on player count
+function GameConfig.getGameModeForPlayerCount(playerCount)
+	if type(playerCount) ~= "number" or playerCount < 1 then
+		playerCount = 1
+	end
+
+	-- หาโหมดที่ตรงกับจำนวนผู้เล่น หรือใกล้เคียงที่สุด
+	local bestMode = GameConfig.PLAYER_MODES[#GameConfig.PLAYER_MODES] -- default to 1 player mode
+	for _, mode in ipairs(GameConfig.PLAYER_MODES) do
+		if playerCount >= mode.playerCount then
+			bestMode = mode
+			break
+		end
+	end
+
+	return bestMode
+end
+
+-- Calculate battery drain rates based on game duration
+-- Returns: { idle, moving, drilling }
+function GameConfig.calculateBatteryDrain(gameDuration, maxBattery)
+	local duration = gameDuration or GameConfig.GAME_DURATION
+	local battery = maxBattery or GameConfig.RESCUE_BOT.maxBattery
+	local drainSettings = GameConfig.RESCUE_BOT.batteryDrain
+
+	-- คำนวณ base rate เพื่อให้ Battery หมดใน 70% ของเวลาเกมถ้าเล่นแบบ active
+	-- สูตร: (maxBattery / (gameDuration * 0.7)) = base rate per second
+	local baseRate = battery / (duration * 0.7)
+
+	-- คำนวณอัตราการใช้แต่ละแบบ
+	local idleRate = baseRate * drainSettings.idleMultiplier
+	local movingRate = baseRate * drainSettings.movingMultiplier
+	local drillingRate = baseRate * drainSettings.drillingMultiplier
+
+	return {
+		idle = idleRate,
+		moving = movingRate,
+		drilling = drillingRate
+	}
+end
+
+-- Get battery drain for current game mode
+function GameConfig.getBatteryDrainForMode(playerCount, hasSolarCell)
+	local mode = GameConfig.getGameModeForPlayerCount(playerCount)
+	local maxBattery = GameConfig.RESCUE_BOT.maxBattery
+
+	-- ถ้ามี SolarCell Battery จะเป็น 2 เท่า
+	if hasSolarCell then
+		maxBattery = maxBattery * 2
+	end
+
+	return GameConfig.calculateBatteryDrain(mode.gameDuration, maxBattery)
 end
 
 -- Print current configuration

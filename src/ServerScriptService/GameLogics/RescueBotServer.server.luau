@@ -868,13 +868,18 @@ local function applyDrillSpin(player, state)
 			state.originalMassless = head.Massless
 			state.originalPhysicalProperties = head.CustomPhysicalProperties
 			state.originalAnchored = head.Anchored
+			state.originalCanCollide = head.CanCollide
 		end
-		-- Unanchor Head เพื่อให้ HingeConstraint หมุนได้
+		-- ตั้งค่า Head ให้หมุนได้แต่ไม่กระเด็น
 		head.Anchored = false
 		head.Massless = true
+		head.CanCollide = false -- ปิด collision เพื่อไม่ให้กระเด็นตอนโดนหิน
 		pcall(function()
 			head.CustomPhysicalProperties = PhysicalProperties.new(0.1, 0.3, 0.3)
 		end)
+		-- Reset velocity เพื่อไม่ให้มีแรงเหลือค้าง
+		head.AssemblyLinearVelocity = Vector3.zero
+		head.AssemblyAngularVelocity = Vector3.zero
 	end
 
 	local model = state.model
@@ -887,6 +892,26 @@ local function applyDrillSpin(player, state)
 			state.wheelConstraints = {}
 			state.anchoredParts = {}
 			local drillArm = model:FindFirstChild("DrillArm")
+
+			-- เก็บและป้องกัน DrillArm parts ทั้งหมดจากการกระเด็น
+			if drillArm then
+				state.drillArmParts = {}
+				-- ป้องกันทุก part ใน DrillArm (ยกเว้น Head ที่จัดการแล้ว)
+				for _, part in ipairs(drillArm:GetDescendants()) do
+					if part:IsA("BasePart") and part ~= state.head then
+						table.insert(state.drillArmParts, {
+							part = part,
+							wasCanCollide = part.CanCollide,
+						})
+						-- ปิด collision และ reset velocity
+						part.CanCollide = false
+						part.AssemblyLinearVelocity = Vector3.zero
+						part.AssemblyAngularVelocity = Vector3.zero
+					end
+				end
+				print(string.format("[Drill] Protected %d DrillArm parts from collision", #state.drillArmParts))
+			end
+
 			for _, descendant in ipairs(model:GetDescendants()) do
 				if descendant:IsA("BasePart") then
 					if drillArm and drillArm:IsAncestorOf(descendant) then
@@ -990,14 +1015,36 @@ local function stopDrillSpin(state)
 			head.Anchored = state.originalAnchored
 		end
 		head.Massless = state.originalMassless or false
+		-- คืนค่า CanCollide เดิม
+		if state.originalCanCollide ~= nil then
+			head.CanCollide = state.originalCanCollide
+		end
 		pcall(function()
 			head.CustomPhysicalProperties = state.originalPhysicalProperties
 		end)
+		-- Reset velocity ก่อนหยุด
+		head.AssemblyLinearVelocity = Vector3.zero
+		head.AssemblyAngularVelocity = Vector3.zero
 	end
 	state.head = nil
 	state.originalMassless = nil
 	state.originalPhysicalProperties = nil
 	state.originalAnchored = nil
+	state.originalCanCollide = nil
+
+	-- คืนค่า DrillArm parts CanCollide เดิม
+	if state.drillArmParts then
+		for _, info in ipairs(state.drillArmParts) do
+			local part = info.part
+			if part and part.Parent then
+				part.CanCollide = info.wasCanCollide or false
+				part.AssemblyLinearVelocity = Vector3.zero
+				part.AssemblyAngularVelocity = Vector3.zero
+			end
+		end
+		print("[Drill] Restored DrillArm parts collision")
+	end
+	state.drillArmParts = nil
 
 	if state.wheelConstraints then
 		for constraint, info in pairs(state.wheelConstraints) do
