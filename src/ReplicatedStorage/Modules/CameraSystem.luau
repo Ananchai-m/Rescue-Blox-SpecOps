@@ -395,8 +395,14 @@ function CameraSystem.startCameraTracking()
 		zoomIndex = 1
 	end
 
-	originalMouseBehavior = UserInputService.MouseBehavior
-	originalMouseIconEnabled = UserInputService.MouseIconEnabled
+	-- บันทึกค่า mouse behavior เดิม
+	if not originalMouseBehavior then
+		originalMouseBehavior = UserInputService.MouseBehavior
+	end
+	if originalMouseIconEnabled == nil then
+		originalMouseIconEnabled = UserInputService.MouseIconEnabled
+	end
+
 	UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
 	UserInputService.MouseIconEnabled = false
 	cameraYaw = 0
@@ -481,12 +487,16 @@ function CameraSystem.stopCameraTracking()
 	zoomIndex = 1
 	cameraYaw = 0
 	cameraPitch = 0
+
+	-- คืนค่า mouse behavior
 	if originalMouseBehavior then
 		UserInputService.MouseBehavior = originalMouseBehavior
 		originalMouseBehavior = nil
 	else
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 	end
+
+	-- คืนค่า mouse icon
 	if originalMouseIconEnabled ~= nil then
 		UserInputService.MouseIconEnabled = originalMouseIconEnabled
 		originalMouseIconEnabled = nil

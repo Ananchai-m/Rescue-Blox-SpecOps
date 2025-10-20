@@ -48,6 +48,45 @@ local isSummaryActive = false
 local summaryPrevMouseBehavior: Enum.MouseBehavior? = nil
 local summaryPrevMouseIconEnabled: boolean? = nil
 
+-- ฟังก์ชันคืนค่า mouse behavior กลับเป็นปกติ
+local function resetMouseBehavior()
+	UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+	UserInputService.MouseIconEnabled = true
+	print("[MouseFix] Reset mouse behavior to default")
+end
+
+-- ตรวจสอบ mouse behavior เฉพาะเมื่อมี input event (ประหยัดกว่า)
+local lastMouseCheckTime = 0
+local MOUSE_CHECK_COOLDOWN = 5 -- วินาที
+
+local function checkMouseBehavior()
+	local currentTime = tick()
+	-- Debounce: เช็คได้ทุก 5 วินาที
+	if currentTime - lastMouseCheckTime < MOUSE_CHECK_COOLDOWN then
+		return
+	end
+	lastMouseCheckTime = currentTime
+
+	-- ถ้าไม่อยู่ในโหมด zoom และไม่มี summary GUI แสดง -> ควรเป็น Default
+	if not CameraSystem.isInZoomMode() and not isSummaryActive then
+		if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
+			print("[MouseFix] Detected stuck mouse behavior - Auto-fixing...")
+			resetMouseBehavior()
+		end
+		if not UserInputService.MouseIconEnabled then
+			print("[MouseFix] Detected hidden mouse - Auto-fixing...")
+			UserInputService.MouseIconEnabled = true
+		end
+	end
+end
+
+-- เช็คเมื่อมี mouse input (ประหยัดกว่า while true)
+UserInputService.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
+		checkMouseBehavior()
+	end
+end)
+
 -- Pinch-to-Zoom variables
 local activeTouches: {[InputObject]: Vector3} = {}
 local lastPinchDistance: number? = nil
@@ -93,18 +132,24 @@ local function monitorSummaryGui(summaryGui)
 		restored = true
 		isSummaryActive = false
 
+		-- คืนค่า mouse behavior
 		if summaryPrevMouseBehavior then
 			UserInputService.MouseBehavior = summaryPrevMouseBehavior
 			summaryPrevMouseBehavior = nil
+			print("[MouseFix] Restored mouse behavior from summary GUI")
 		else
 			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+			print("[MouseFix] Reset mouse behavior to Default after summary GUI")
 		end
 
+		-- คืนค่า mouse icon
 		if summaryPrevMouseIconEnabled ~= nil then
 			UserInputService.MouseIconEnabled = summaryPrevMouseIconEnabled
 			summaryPrevMouseIconEnabled = nil
+			print("[MouseFix] Restored mouse icon from summary GUI")
 		else
 			UserInputService.MouseIconEnabled = true
+			print("[MouseFix] Reset mouse icon to visible after summary GUI")
 		end
 		showTopbarIcons()
 	end
@@ -1255,6 +1300,9 @@ local function stopOriginalRescueMode()
 	-- หยุด camera tracking
 	CameraSystem.stopCameraTracking()
 
+	-- คืนค่า mouse behavior กลับเป็นปกติ
+	resetMouseBehavior()
+
 	-- ปลดล็อค character และคืน camera
 	if character and character:FindFirstChild("Humanoid") then
 		character.Humanoid.PlatformStand = false
@@ -1570,6 +1618,9 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 		end
 		showTopbarIcons()
 
+		-- คืนค่า mouse behavior กลับเป็นปกติ
+		resetMouseBehavior()
+
 		-- ล้างสถานะเกมทั้งหมด
 		playerInGame = false
 		isRescueMode = false
@@ -1638,6 +1689,9 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 			unregisterVotingComplete = nil
 		end
 		showTopbarIcons()
+
+		-- คืนค่า mouse behavior กลับเป็นปกติ
+		resetMouseBehavior()
 	end
 end)
 
