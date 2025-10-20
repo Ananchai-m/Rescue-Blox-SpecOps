@@ -836,7 +836,7 @@ function DrillSystem.handleDrillingClick(clickPosition)
 			-- สร้างเสียงใหม่
 			currentDrillSound = Instance.new("Sound")
 			currentDrillSound.SoundId = "rbxassetid://9118907884"
-			currentDrillSound.Volume = 1
+			currentDrillSound.Volume = 0.5 -- ลดเสียงลง 50%
 			currentDrillSound.Looped = true -- ทำให้เสียงวนลูป
 			currentDrillSound.Parent = drillArmPart
 			currentDrillSound:Play()
@@ -846,7 +846,7 @@ function DrillSystem.handleDrillingClick(clickPosition)
 		elseif currentDrillSound and isFadingOut then
 			-- ถ้ากำลัง fade out อยู่ ให้ฟื้นฟู volume
 			isFadingOut = false
-			currentDrillSound.Volume = 1
+			currentDrillSound.Volume = 0.5 -- ลดเสียงลง 50%
 		end
 	end
 
@@ -1115,7 +1115,7 @@ drillSoundRemote.OnClientEvent:Connect(function(otherPlayer, action)
 		-- Create and play drill sound
 		local drillSound = Instance.new("Sound")
 		drillSound.SoundId = "rbxassetid://9118907884"
-		drillSound.Volume = 0.8 -- ลดเสียงของผู้เล่นอื่นนิดหน่อย
+		drillSound.Volume = 0.4 -- ลดเสียงของผู้เล่นอื่นลง 50% (จาก 0.8)
 		drillSound.Looped = true
 		drillSound.Parent = drillArmPart
 		drillSound:Play()
