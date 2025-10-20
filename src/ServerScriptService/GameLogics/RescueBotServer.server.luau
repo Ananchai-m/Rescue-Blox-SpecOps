@@ -188,6 +188,9 @@ local rescueBotHealthInstances = {} -- เก็บ RescueBotHealth instances
 -- Server-side Waiting System variables
 local waitingPlayers = {}
 local isGamePlaying = false
+local lobbyCountdownThread = nil
+local lobbyCountdownTime = 0
+local isCountingDown = false
 
 local function foldDrillArm(model: Model?, playerName: string, context: string)
 	if not model then
@@ -1929,8 +1932,22 @@ local function startGame()
 	end
 
 
-	-- แจ้ง clients ให้เริ่มเกม
-	waitingSystemRemote:FireAllClients("startGame", playersArray)
+	-- คำนวณ game duration ตามจำนวนผู้เล่น
+	local playerCount = #waitingPlayers
+	local gameMode = GameConfig.getGameModeForPlayerCount(playerCount)
+	local gameDuration = gameMode.gameDuration
+
+	print(string.format("[Server] Starting game with %d players - Duration: %d seconds", playerCount, gameDuration))
+
+	-- แจ้งทุก client ว่าเกมเริ่มแล้ว และให้เริ่ม billboard timer (ส่งไปทุกคน)
+	waitingSystemRemote:FireAllClients("gameStarted", gameDuration, playerCount)
+	print("[Server] Broadcasted gameStarted to all clients - Duration:", gameDuration)
+
+	-- แจ้ง clients ที่อยู่ในเกมให้เริ่มเล่น (เฉพาะผู้เล่นที่อยู่ในเกม)
+	for _, player in ipairs(waitingPlayers) do
+		waitingSystemRemote:FireClient(player, "startGame", playersArray)
+		print("[Server] Sent startGame to", player.Name)
+	end
 
 	-- เริ่มต้น GameSummary สำหรับผู้เล่นทุกคน
 	GameSummary.initializeAllPlayers()
@@ -2022,13 +2039,70 @@ local function endGame()
 	GameSummary.reset()
 end
 
--- ฟัง event จาก client เมื่อ timer หมด
-gameTimerRemote.OnServerEvent:Connect(function(player, action)
+-- ฟัง event จาก client เมื่อ timer หมดหรือ sync เวลา
+gameTimerRemote.OnServerEvent:Connect(function(player, action, ...)
 	if action == "timerFinished" then
 		print("Received timer finished signal from", player.Name)
 		endGame()
+	elseif action == "syncTime" then
+		-- รับเวลาจาก client ที่กำลังเล่น แล้ว broadcast ไปทุกคน
+		local timeLeft, timeText = ...
+		if timeLeft and timeText and isGamePlaying then
+			-- Broadcast ทั้ง timeLeft และ timeText (MM:SS) ไปทุก client เพื่อ sync Billboard
+			waitingSystemRemote:FireAllClients("updateGameTime", timeLeft, timeText)
+		end
 	end
 end)
+
+-- ฟังก์ชันเริ่มนับถอยหลังใน lobby (รอผู้เล่น)
+local function startLobbyCountdown()
+	if isCountingDown or isGamePlaying then
+		return
+	end
+
+	isCountingDown = true
+	lobbyCountdownTime = GameConfig.WAITING_SYSTEM.lobbyTimeout or 60
+
+	print("[Lobby] Starting countdown:", lobbyCountdownTime, "seconds")
+
+	-- ส่งข้อมูลการนับถอยหลังไปยัง clients
+	waitingSystemRemote:FireAllClients("lobbyCountdownStarted", lobbyCountdownTime)
+
+	-- เริ่มนับถอยหลัง
+	lobbyCountdownThread = task.spawn(function()
+		while lobbyCountdownTime > 0 and isCountingDown do
+			task.wait(1)
+			lobbyCountdownTime = lobbyCountdownTime - 1
+
+			-- อัปเดตเวลาถอยหลังทุก 5 วินาที หรือเมื่อเหลือน้อยกว่า 10 วินาที
+			if lobbyCountdownTime % 5 == 0 or lobbyCountdownTime <= 10 then
+				waitingSystemRemote:FireAllClients("lobbyCountdownUpdate", lobbyCountdownTime)
+				print("[Lobby] Countdown:", lobbyCountdownTime, "seconds remaining")
+			end
+		end
+
+		-- หมดเวลา - เริ่มเกมกับผู้เล่นที่มี
+		if isCountingDown and #waitingPlayers >= 1 then
+			print("[Lobby] Countdown finished - Starting game with", #waitingPlayers, "players")
+			startGame()
+		end
+
+		isCountingDown = false
+		lobbyCountdownThread = nil
+	end)
+end
+
+-- ฟังก์ชันหยุดนับถอยหลัง lobby
+local function stopLobbyCountdown()
+	if lobbyCountdownThread then
+		task.cancel(lobbyCountdownThread)
+		lobbyCountdownThread = nil
+	end
+	isCountingDown = false
+	lobbyCountdownTime = 0
+	waitingSystemRemote:FireAllClients("lobbyCountdownStopped")
+	print("[Lobby] Countdown stopped")
+end
 
 local function addWaitingPlayer(player)
 	-- ตรวจสอบว่าผู้เล่นอยู่ในรายการแล้วหรือไม่
@@ -2050,8 +2124,14 @@ local function addWaitingPlayer(player)
 	-- แจ้ง clients ทั้งหมด
 	waitingSystemRemote:FireAllClients("updateCount", #waitingPlayers, GameConfig.getMaxPlayers())
 
-	-- ตรวจสอบว่าครบจำนวนแล้วหรือไม่
+	-- ถ้ามีผู้เล่นคนแรก ให้เริ่มนับถอยหลัง
+	if #waitingPlayers == 1 then
+		startLobbyCountdown()
+	end
+
+	-- ถ้าครบจำนวนสูงสุด ให้เริ่มเกมทันที
 	if #waitingPlayers >= GameConfig.getMaxPlayers() then
+		stopLobbyCountdown()
 		startGame()
 		return true
 	end
@@ -2066,11 +2146,28 @@ waitingSystemRemote.OnServerEvent:Connect(function(player, action, ...)
 		-- ส่งผลลัพธ์กลับให้ player ที่ request
 		waitingSystemRemote:FireClient(player, "gameReady", gameReady)
 	elseif action == "removePlayer" then
+		-- ป้องกันไม่ให้ออกจากคิวได้หลังจากเกมเริ่มแล้ว
+		if isGamePlaying then
+			warn(player.Name, "tried to leave waiting list but game already started")
+			return
+		end
+
 		for i = #waitingPlayers, 1, -1 do
 			if waitingPlayers[i] == player then
 				table.remove(waitingPlayers, i)
 				print("Removed", player.Name, "from waiting list. Total waiting:", #waitingPlayers)
 				waitingSystemRemote:FireAllClients("updateCount", #waitingPlayers, GameConfig.getMaxPlayers())
+
+				-- แจ้ง client ที่ออกจากคิวว่าถูกลบออกแล้ว (ยกเลิกการเข้าเกม)
+				waitingSystemRemote:FireClient(player, "removedFromWaiting")
+				print("[Server] Notified", player.Name, "that they were removed from waiting list")
+
+				-- ถ้าไม่มีผู้เล่นเหลือเลย ให้หยุด countdown
+				if #waitingPlayers == 0 then
+					stopLobbyCountdown()
+					print("[Lobby] No players left - countdown stopped")
+				end
+
 				break
 			end
 		end

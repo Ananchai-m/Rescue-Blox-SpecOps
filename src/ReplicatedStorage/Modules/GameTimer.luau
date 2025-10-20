@@ -190,11 +190,27 @@ function GameTimer.startCountdown(duration)
 
 	-- เริ่ม timer
 	timerThread = task.spawn(function()
+		local lastSyncTime = 0 -- เวลาที่ sync ครั้งล่าสุด
+		local isFirstSync = true -- ตัวแปรเช็คว่าเป็น sync ครั้งแรกหรือไม่
+
 		while timeLeft > 0 and timerGui and timerGui.Parent do
 			-- อัปเดตการแสดงผล
 			local minutes = math.floor(timeLeft / 60)
 			local seconds = timeLeft % 60
-			timerLabel.Text = string.format("%02d:%02d", minutes, seconds)
+			local timeText = string.format("%02d:%02d", minutes, seconds)
+			timerLabel.Text = timeText
+
+			-- Sync เวลาไปยัง server (ครั้งแรกทันที แล้วทุก 5 วินาที)
+			if isFirstSync or tick() - lastSyncTime >= 5 then
+				local gameTimerRemote = ReplicatedStorage:FindFirstChild("RescueBotRemotes"):FindFirstChild("GameTimer")
+				if gameTimerRemote then
+					-- ส่งทั้ง timeLeft และ timeText (MM:SS) ไปด้วย
+					gameTimerRemote:FireServer("syncTime", timeLeft, timeText)
+					print("[GameTimer] Synced time to server:", timeText)
+				end
+				lastSyncTime = tick()
+				isFirstSync = false
+			end
 
 			-- เปลี่ยนสีและเพิ่มเอฟเฟกต์เมื่อเวลาเหลือน้อย
 			if timeLeft <= 60 then

@@ -3,7 +3,7 @@ local RunService = game:GetService("RunService")
 local GameConfig = {}
 
 -- Game Settings
-GameConfig.MAX_PLAYERS = 1
+GameConfig.MAX_PLAYERS = 5 -- รองรับ 1-5 ผู้เล่น (ตาม PLAYER_MODES)
 GameConfig.GAME_DURATION = 300 -- 5 minutes in seconds
 
 -- Player Modes Settings (auto-scaling based on player count)
@@ -37,7 +37,7 @@ GameConfig.PLAYER_MODES = {
 
 -- Waiting System Settings
 GameConfig.WAITING_SYSTEM = {
-	maxPlayers = 1,
+	maxPlayers = 5, -- รองรับ 1-5 ผู้เล่น (ตาม PLAYER_MODES)
 	lobbyTimeout = 60 -- seconds to wait before auto-starting with minimum players
 }
 

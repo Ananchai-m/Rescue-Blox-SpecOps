@@ -1123,6 +1123,49 @@ end
 local simuDebounce = false
 local playerInGame = false -- ตัวแปรควบคุมว่าผู้เล่นคนนี้อยู่ในเกมหรือไม่
 local isInOriginalRescueMode = false -- ตัวแปรควบคุมว่าผู้เล่นอยู่ใน Original Rescue Mode หรือไม่
+local isPlayerInSimu = false -- ติดตามว่าผู้เล่นอยู่ใน Simu หรือไม่
+local simuCheckThread = nil -- thread สำหรับเช็คว่าผู้เล่นยังอยู่ใน Simu หรือไม่
+
+-- ฟังก์ชันเช็คว่าผู้เล่นยังอยู่ใน Simu หรือไม่
+local function isCharacterTouchingSimu()
+	local simu = Workspace:FindFirstChild("Simu")
+	if not simu or not character or not character.PrimaryPart then
+		return false
+	end
+
+	-- เช็คระยะห่างระหว่างผู้เล่นกับ Simu
+	local distance = (character.PrimaryPart.Position - simu.Position).Magnitude
+	local maxDistance = (simu.Size.Magnitude / 2) + 5 -- รัศมีของ Simu + buffer 5 studs
+
+	return distance <= maxDistance
+end
+
+-- ฟังก์ชันเริ่มเช็คว่าผู้เล่นยังอยู่ใน Simu หรือไม่
+local function startSimuCheck()
+	-- หยุด thread เก่าถ้ามี
+	if simuCheckThread then
+		task.cancel(simuCheckThread)
+		simuCheckThread = nil
+	end
+
+	-- เริ่ม thread ใหม่เพื่อเช็คทุก 0.5 วินาที
+	simuCheckThread = task.spawn(function()
+		while isPlayerInSimu and not playerInGame do
+			task.wait(0.5)
+
+			-- เช็คว่าผู้เล่นยังอยู่ใน Simu หรือไม่
+			if not isCharacterTouchingSimu() then
+				print("Player left Simu zone - Requesting to leave waiting list")
+				isPlayerInSimu = false
+
+				-- ส่งคำขอออกจากคิวไป server
+				waitingSystemRemote:FireServer("removePlayer")
+				break
+			end
+		end
+	end)
+end
+
 local function setupSimuTouched()
 	-- Disconnect ถ้ามี connection เก่า
 	if connections.simuTouched then
@@ -1131,9 +1174,15 @@ local function setupSimuTouched()
 
 	local simu = Workspace:FindFirstChild("Simu")
 	if simu and simu:IsA("BasePart") then
+		-- เมื่อแตะ Simu = เข้าร่วม waiting list
 		connections.simuTouched = simu.Touched:Connect(function(hit)
 			-- ตรวจสอบว่าผู้เล่นคนนี้อยู่ในเกมแล้วหรือยัง
 			if playerInGame then
+				return
+			end
+
+			-- ป้องกันการเข้าซ้ำ
+			if isPlayerInSimu then
 				return
 			end
 
@@ -1142,20 +1191,26 @@ local function setupSimuTouched()
 			local humanoidHit = hit.Parent:FindFirstChildOfClass("Humanoid")
 			if humanoidHit and hit.Parent == character then
 				simuDebounce = true
+				isPlayerInSimu = true
+
 				print("Touched Simu - Requesting to join waiting list")
 				print("DEBUG: Player", player.Name, "touching Simu. playerInGame =", playerInGame)
 
-				-- ส่งคำขอไป server
+				-- ส่งคำขอเข้าร่วมไป server
 				waitingSystemRemote:FireServer("addPlayer")
 
-				-- Reset debounce หลัง 2 วินาที (ใช้ spawn เพื่อไม่ block)
+				-- เริ่มเช็คว่าผู้เล่นยังอยู่ใน Simu หรือไม่
+				startSimuCheck()
+
+				-- Reset debounce หลัง 0.5 วินาที
 				spawn(function()
-					wait(2)
+					wait(0.5)
 					simuDebounce = false
 				end)
 			end
 		end)
-		print("Simu part found - Touch it to control original Rescue Model")
+
+		print("Simu part found - Stay in Simu to join, leave Simu to cancel")
 	else
 		warn("Simu part not found in workspace")
 	end
@@ -1251,8 +1306,16 @@ local function startOriginalRescueMode()
 		-- สร้าง flip GUI สำหรับ original rescue
 		createFlipGui(originalRescueModel)
 
-		-- เริ่ม Game Timer (ใช้ GameConfig)
-		GameTimer.startCountdown(GameConfig.getGameDuration())
+		-- เริ่ม Game Timer (คำนวณตามจำนวนผู้เล่น)
+		local playerCount = #Players:GetPlayers()
+		local gameMode = GameConfig.getGameModeForPlayerCount(playerCount)
+		local gameDuration = gameMode.gameDuration
+
+		print(string.format("[RescueBotController] Starting game timer - Duration: %d seconds", gameDuration))
+
+		GameTimer.startCountdown(gameDuration)
+
+		-- หมายเหตุ: Billboard timer ถูกเริ่มโดย "gameStarted" event จาก server แล้ว
 
 		-- Set callback เมื่อ timer หมด
 		GameTimer.onTimerFinished = function()
@@ -1262,6 +1325,9 @@ local function startOriginalRescueMode()
 			if gameTimerRemote then
 				gameTimerRemote:FireServer("timerFinished")
 			end
+
+			-- หยุด billboard timer
+			WaitingSystem.stopGame()
 		end
 
 		-- ล้าง connection เก่าก่อนสร้างใหม่
@@ -1512,7 +1578,56 @@ setupSimuTouched() -- Setup Simu touch event
 
 -- Handle WaitingSystem RemoteEvent responses
 waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
-	if action == "gameReady" then
+	if action == "gameStarted" then
+		-- เกมเริ่มแล้ว - รอให้โหวต map เสร็จก่อนแสดงเวลา
+		local gameDuration, playerCount = ...
+		print(string.format("[RescueBotController] Game started - Duration: %d seconds, Players: %d", gameDuration, playerCount))
+
+		-- ไม่เรียก startGameTimer ตรงนี้ ให้รอ GameTimer sync มาแทน
+
+	elseif action == "updateGameTime" then
+		-- รับการซิงค์เวลาจาก GameTimer ผ่าน server (ทั้ง timeLeft และ timeText)
+		local timeLeft, timeText = ...
+		WaitingSystem.updateGameTime(timeLeft, timeText)
+
+	elseif action == "lobbyCountdownStarted" then
+		-- lobby countdown เริ่มต้น
+		local duration = ...
+		WaitingSystem.startLobbyCountdown(duration)
+
+	elseif action == "lobbyCountdownUpdate" then
+		-- อัปเดตเวลา lobby countdown
+		local timeLeft = ...
+		WaitingSystem.updateLobbyCountdown(timeLeft)
+
+	elseif action == "lobbyCountdownStopped" then
+		-- lobby countdown หยุด
+		WaitingSystem.stopLobbyCountdown()
+
+	elseif action == "removedFromWaiting" then
+		-- ผู้เล่นคนนี้ถูกลบออกจากคิว (เดินออกจาก Simu)
+		print("[RescueBotController] Removed from waiting list - cancelling game entry")
+
+		-- ยกเลิก Map Vote ถ้ากำลังโหวตอยู่
+		if unregisterVotingComplete then
+			unregisterVotingComplete()
+			unregisterVotingComplete = nil
+		end
+
+		-- ปิด Map Selection UI ถ้าเปิดอยู่ (ลบ GUI โดยตรง)
+		local mapSelectionGui = playerGui:FindFirstChild("MapSelectionGui")
+		if mapSelectionGui then
+			mapSelectionGui:Destroy()
+			print("[RescueBotController] Closed Map Selection GUI")
+		end
+
+		-- รีเซ็ตสถานะ
+		playerInGame = false
+		isPlayerInSimu = false
+
+		print("[RescueBotController] Successfully cancelled game entry")
+
+	elseif action == "gameReady" then
 		local gameReady = ...
 		if gameReady then
 			-- ครบจำนวนแล้ว เริ่มนับถอยหลัง แล้วเริ่ม Map Selection แล้วเริ่มเกม
@@ -1520,40 +1635,22 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 
 			-- ตั้งสถานะว่าผู้เล่นคนนี้เข้าเกมแล้ว
 			playerInGame = true
+			isPlayerInSimu = false
+
+			-- หยุด Simu check thread
+			if simuCheckThread then
+				task.cancel(simuCheckThread)
+				simuCheckThread = nil
+			end
+
 			print("Player entered game - Simu disabled for this player")
 		else
 			print("Added to waiting list - waiting for more players...")
 		end
 	elseif action == "updateCount" then
 		local waitingCount, maxPlayers = ...
-		currentWaitingCount = waitingCount
-
-		-- อัปเดต billboard หรือ UI (ใช้ WaitingSystem ตรงๆ)
-		spawn(function()
-			pcall(function()
-				-- ใช้ module WaitingSystem ที่มีอยู่
-				local simu = Workspace:FindFirstChild("Simu")
-				if simu and simu:FindFirstChild("Attachment") then
-					local billboardGui = simu.Attachment:FindFirstChild("BillboardGui")
-					if billboardGui and billboardGui:FindFirstChild("Frame") then
-						local textLabel = billboardGui.Frame:FindFirstChild("TextLabel")
-						if textLabel then
-							local maxPlayersFromConfig = GameConfig.getMaxPlayers()
-							local remaining = maxPlayersFromConfig - waitingCount
-							if waitingCount > 0 and remaining > 0 then
-								textLabel.Text = string.format("Waiting for other players %d/%d คน", remaining, maxPlayersFromConfig)
-								textLabel.Visible = true
-							elseif waitingCount == 0 then
-								textLabel.Text = "Please join the mission!"
-								textLabel.Visible = true
-							end
-						end
-					end
-				end
-			end)
-		end)
-
-		print("Waiting count updated:", waitingCount, "/", GameConfig.getMaxPlayers())
+		-- อัปเดตจำนวนผู้เล่นที่รอใน WaitingSystem
+		WaitingSystem.updateWaitingCount(waitingCount)
 	elseif action == "startGame" then
 		local playersArray = ...
 		print("Server started game with players:", table.concat(playersArray, ", "))
