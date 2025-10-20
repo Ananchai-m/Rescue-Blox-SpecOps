@@ -1473,6 +1473,39 @@ local LIGHT_DEBRIS_PROPERTIES = PhysicalProperties.new(
 	0.5    -- ElasticityWeight
 )
 
+-- ฟังก์ชัน fade debris ค่อยๆหายไป
+local function fadeDebris(debrisPart, delayTime, fadeDuration)
+	task.spawn(function()
+		-- รอก่อน fade
+		task.wait(delayTime or 3)
+
+		if not debrisPart or not debrisPart.Parent then
+			return
+		end
+
+		-- เก็บ Transparency เดิม
+		local originalTransparency = debrisPart.Transparency
+		local fadeTime = fadeDuration or 2 -- fade ใช้เวลา 2 วินาที
+		local steps = 20 -- จำนวนขั้นตอนการ fade
+		local stepTime = fadeTime / steps
+		local transparencyIncrement = (1 - originalTransparency) / steps
+
+		-- ค่อยๆเพิ่ม Transparency
+		for i = 1, steps do
+			if not debrisPart or not debrisPart.Parent then
+				break
+			end
+			debrisPart.Transparency = math.min(1, debrisPart.Transparency + transparencyIncrement)
+			task.wait(stepTime)
+		end
+
+		-- ลบ part เมื่อ fade เสร็จ
+		if debrisPart and debrisPart.Parent then
+			debrisPart:Destroy()
+		end
+	end)
+end
+
 drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPartsData, rescuePosition, ejectStrength)
 	print("Server received drill complete from", player.Name, "for part:", partData.Name, "Strength:", ejectStrength or "normal")
 
@@ -1524,8 +1557,6 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 			print(string.format("[Mobile Optimization] Reduced debris from %d to %d parts", #directChildren + (#tempChildren - reducedCount), #directChildren))
 		end
 
-		local Debris = game:GetService("Debris")
-
 		for _, nestedPart in ipairs(directChildren) do
 			if nestedPart.Parent ~= workspace then
 				nestedPart.Parent = parentContainer or workspace
@@ -1563,11 +1594,17 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 				math.random(-rotationMultiplier, rotationMultiplier)
 			)
 			nestedPart.AssemblyAngularVelocity = randomRotation
-			print("Ejected nested part:", nestedPart.Name)
+
+			-- ใช้ fadeDebris แทน Debris:AddItem เพื่อให้ค่อยๆหายไป
+			fadeDebris(nestedPart, 3, 2) -- รอ 3 วินาที แล้ว fade ใน 2 วินาที
+			print("Ejected nested part:", nestedPart.Name, "- Will fade after 3 seconds")
 		end
 
-		Debris:AddItem(part, 0.1)
-		print("Main part", part.Name, "scheduled for removal")
+		-- ลบ main part ทันที
+		if part and part.Parent then
+			part:Destroy()
+		end
+		print("Main part", part.Name, "removed immediately")
 
 		return
 	end
