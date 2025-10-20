@@ -146,6 +146,16 @@ GameConfig.UI = {
 	mapSelectioCornerRadius = UDim.new(0.05, 0)
 }
 
+-- Mobile/Tablet Performance Settings
+GameConfig.MOBILE_PERFORMANCE = {
+	REDUCE_DEBRIS_COUNT = 0.5,        -- ลดจำนวนเศษหินเหลือ 50%
+	DEBRIS_LIFETIME = 3,               -- เศษหินหายใน 3 วินาที (แทน 5-10 วินาที)
+	PARTICLE_RATE_MULTIPLIER = 0.3,    -- ลด particle emission 70%
+	MAX_ACTIVE_DEBRIS = 15,            -- จำกัดเศษหินสูงสุด 15 ชิ้นพร้อมกัน
+	DEBRIS_PHYSICS_TIMEOUT = 2,        -- หยุด physics หลัง 2 วินาที แล้วลบ
+	DISABLE_OTHER_PLAYER_EFFECTS = true -- ปิด particle effects ของผู้เล่นอื่น
+}
+
 -- Debug Settings
 GameConfig.DEBUG = {
 	enableLogging = true,

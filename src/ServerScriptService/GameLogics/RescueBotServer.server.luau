@@ -1523,20 +1523,41 @@ local LIGHT_DEBRIS_PROPERTIES = PhysicalProperties.new(
 	0.5    -- ElasticityWeight
 )
 
--- ฟังก์ชัน fade debris ค่อยๆหายไป
-local function fadeDebris(debrisPart, delayTime, fadeDuration)
+-- ตัวแปรติดตามจำนวน debris ที่ active (สำหรับ mobile optimization)
+local activeDebrisCount = 0
+local MAX_MOBILE_DEBRIS = GameConfig.MOBILE_PERFORMANCE.MAX_ACTIVE_DEBRIS
+
+-- ฟังก์ชัน fade debris ค่อยๆหายไป (ปรับแต่งสำหรับ mobile)
+local function fadeDebris(debrisPart, delayTime, fadeDuration, isMobileOptimized)
 	task.spawn(function()
-		-- รอก่อน fade
-		task.wait(delayTime or 3)
+		-- ถ้าเป็น mobile optimization ให้หยุด physics ก่อน fade
+		if isMobileOptimized then
+			task.wait(GameConfig.MOBILE_PERFORMANCE.DEBRIS_PHYSICS_TIMEOUT)
+
+			if debrisPart and debrisPart.Parent then
+				-- หยุด physics แต่ยังไม่ลบ
+				debrisPart.Anchored = true
+				debrisPart.CanCollide = false
+				debrisPart.AssemblyLinearVelocity = Vector3.zero
+				debrisPart.AssemblyAngularVelocity = Vector3.zero
+			end
+		end
+
+		-- รอก่อน fade (ใช้ค่าจาก config สำหรับ mobile)
+		local actualDelay = isMobileOptimized and GameConfig.MOBILE_PERFORMANCE.DEBRIS_LIFETIME or (delayTime or 3)
+		task.wait(actualDelay)
 
 		if not debrisPart or not debrisPart.Parent then
+			if isMobileOptimized then
+				activeDebrisCount = math.max(0, activeDebrisCount - 1)
+			end
 			return
 		end
 
 		-- เก็บ Transparency เดิม
 		local originalTransparency = debrisPart.Transparency
 		local fadeTime = fadeDuration or 2 -- fade ใช้เวลา 2 วินาที
-		local steps = 20 -- จำนวนขั้นตอนการ fade
+		local steps = isMobileOptimized and 10 or 20 -- ลดขั้นตอนบน mobile
 		local stepTime = fadeTime / steps
 		local transparencyIncrement = (1 - originalTransparency) / steps
 
@@ -1552,6 +1573,11 @@ local function fadeDebris(debrisPart, delayTime, fadeDuration)
 		-- ลบ part เมื่อ fade เสร็จ
 		if debrisPart and debrisPart.Parent then
 			debrisPart:Destroy()
+		end
+
+		-- ลดจำนวน active debris
+		if isMobileOptimized then
+			activeDebrisCount = math.max(0, activeDebrisCount - 1)
 		end
 	end)
 end
@@ -1592,9 +1618,10 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 	if #directChildren > 0 then
 		print(string.format("Breakable hierarchy detected - Main: %s | Nested parts: %d", part.Name, #directChildren))
 
-		-- Reduce debris count for mobile optimization (keep only 30% of parts)
+		-- Reduce debris count for mobile optimization (keep only 50% of parts)
 		if hasMobilePlayers and #directChildren > 3 then
-			local reducedCount = math.max(3, math.floor(#directChildren * 0.3))
+			local reduceMultiplier = GameConfig.MOBILE_PERFORMANCE.REDUCE_DEBRIS_COUNT
+			local reducedCount = math.max(3, math.floor(#directChildren * reduceMultiplier))
 			local tempChildren = {}
 			for i = 1, reducedCount do
 				table.insert(tempChildren, directChildren[i])
@@ -1607,6 +1634,20 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 			print(string.format("[Mobile Optimization] Reduced debris from %d to %d parts", #directChildren + (#tempChildren - reducedCount), #directChildren))
 		end
 
+		-- Check debris limit สำหรับ mobile (ถ้าเกินให้ลบของเก่าทิ้งก่อน)
+		if hasMobilePlayers and activeDebrisCount >= MAX_MOBILE_DEBRIS then
+			print(string.format("[Mobile Optimization] Debris limit reached (%d/%d) - skipping some debris", activeDebrisCount, MAX_MOBILE_DEBRIS))
+			-- ลด nested parts ให้เหลือแค่ 1-2 ชิ้น
+			local tempChildren = {}
+			for i = 1, math.min(2, #directChildren) do
+				table.insert(tempChildren, directChildren[i])
+			end
+			for i = 3, #directChildren do
+				directChildren[i]:Destroy()
+			end
+			directChildren = tempChildren
+		end
+
 		for _, nestedPart in ipairs(directChildren) do
 			if nestedPart.Parent ~= workspace then
 				nestedPart.Parent = parentContainer or workspace
@@ -1617,7 +1658,13 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 			nestedPart.Massless = true
 			nestedPart.CustomPhysicalProperties = LIGHT_DEBRIS_PROPERTIES
 
-			local velocityMultiplier = (ejectStrength == "strong") and 150 or 80
+			-- ลดความแรงกระเด็นบน mobile เพื่อประหยัด physics
+			local velocityMultiplier
+			if hasMobilePlayers then
+				velocityMultiplier = (ejectStrength == "strong") and 100 or 60
+			else
+				velocityMultiplier = (ejectStrength == "strong") and 150 or 80
+			end
 
 			local ejectDirection
 			if rescuePosition then
@@ -1637,7 +1684,14 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 
 			nestedPart.AssemblyLinearVelocity = ejectDirection * velocityMultiplier
 
-			local rotationMultiplier = (ejectStrength == "strong") and 15 or 10
+			-- ลดการหมุนบน mobile
+			local rotationMultiplier
+			if hasMobilePlayers then
+				rotationMultiplier = (ejectStrength == "strong") and 10 or 5
+			else
+				rotationMultiplier = (ejectStrength == "strong") and 15 or 10
+			end
+
 			local randomRotation = Vector3.new(
 				math.random(-rotationMultiplier, rotationMultiplier),
 				math.random(-rotationMultiplier, rotationMultiplier),
@@ -1646,8 +1700,11 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 			nestedPart.AssemblyAngularVelocity = randomRotation
 
 			-- ใช้ fadeDebris แทน Debris:AddItem เพื่อให้ค่อยๆหายไป
-			fadeDebris(nestedPart, 3, 2) -- รอ 3 วินาที แล้ว fade ใน 2 วินาที
-			print("Ejected nested part:", nestedPart.Name, "- Will fade after 3 seconds")
+			if hasMobilePlayers then
+				activeDebrisCount = activeDebrisCount + 1
+			end
+			fadeDebris(nestedPart, 3, 2, hasMobilePlayers) -- รอ 3 วินาที แล้ว fade ใน 2 วินาที (mobile optimized)
+			print("Ejected nested part:", nestedPart.Name, hasMobilePlayers and "- Mobile optimized" or "- Standard physics")
 		end
 
 		-- ลบ main part ทันที
