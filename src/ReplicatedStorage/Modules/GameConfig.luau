@@ -6,6 +6,35 @@ local GameConfig = {}
 GameConfig.MAX_PLAYERS = 1
 GameConfig.GAME_DURATION = 300 -- 5 minutes in seconds
 
+-- Player Modes Settings (auto-scaling based on player count)
+GameConfig.PLAYER_MODES = {
+	{
+		playerCount = 5,
+		gameDuration = 900,  -- 15 minutes
+		victimCount = 30
+	},
+	{
+		playerCount = 4,
+		gameDuration = 720,  -- 12 minutes
+		victimCount = 27
+	},
+	{
+		playerCount = 3,
+		gameDuration = 540,  -- 9 minutes
+		victimCount = 15
+	},
+	{
+		playerCount = 2,
+		gameDuration = 300,  -- 5 minutes
+		victimCount = 10
+	},
+	{
+		playerCount = 1,
+		gameDuration = 300,  -- 5 minutes
+		victimCount = 5
+	}
+}
+
 -- Waiting System Settings
 GameConfig.WAITING_SYSTEM = {
 	maxPlayers = 1,
