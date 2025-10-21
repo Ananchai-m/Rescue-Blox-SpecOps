@@ -149,11 +149,13 @@ GameConfig.UI = {
 -- Mobile/Tablet Performance Settings
 GameConfig.MOBILE_PERFORMANCE = {
 	REDUCE_DEBRIS_COUNT = 0.5,        -- ลดจำนวนเศษหินเหลือ 50%
-	DEBRIS_LIFETIME = 3,               -- เศษหินหายใน 3 วินาที (แทน 5-10 วินาที)
+	DEBRIS_LIFETIME = 1.5,             -- เศษหินหายใน 1.5 วินาที (ลดจาก 3)
 	PARTICLE_RATE_MULTIPLIER = 0.3,    -- ลด particle emission 70%
-	MAX_ACTIVE_DEBRIS = 15,            -- จำกัดเศษหินสูงสุด 15 ชิ้นพร้อมกัน
-	DEBRIS_PHYSICS_TIMEOUT = 2,        -- หยุด physics หลัง 2 วินาที แล้วลบ
-	DISABLE_OTHER_PLAYER_EFFECTS = true -- ปิด particle effects ของผู้เล่นอื่น
+	MAX_ACTIVE_DEBRIS = 10,            -- จำกัดเศษหินสูงสุด 10 ชิ้นพร้อมกัน (ลดจาก 15)
+	DEBRIS_PHYSICS_TIMEOUT = 0.8,      -- หยุด physics หลัง 0.8 วินาที (ลดจาก 2)
+	DISABLE_OTHER_PLAYER_EFFECTS = true, -- ปิด particle effects ของผู้เล่นอื่น
+	DEBRIS_VELOCITY_MULTIPLIER = 0.4,  -- ลดความเร็วกระเด็นเหลือ 40%
+	DEBRIS_GRAVITY_MULTIPLIER = 2.5    -- เพิ่มแรงโน้มถ่วงให้ตกเร็วขึ้น 2.5 เท่า
 }
 
 -- Debug Settings

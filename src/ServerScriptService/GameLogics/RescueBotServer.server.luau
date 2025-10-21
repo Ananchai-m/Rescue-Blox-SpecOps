@@ -1515,12 +1515,13 @@ local function isBreakablePart(instance)
 	return instance:IsA("BasePart") or instance:IsA("MeshPart")
 end
 
+-- Physics properties สำหรับ debris (ปรับให้ตกเร็วขึ้น ไม่ลอย)
 local LIGHT_DEBRIS_PROPERTIES = PhysicalProperties.new(
-	0.05,  -- Density: very light
-	0.05,  -- Friction: minimal drag when sliding
-	0.3,   -- Elasticity: small bounce to keep motion lively
-	0.5,   -- FrictionWeight
-	0.5    -- ElasticityWeight
+	0.7,   -- Density: เพิ่มจาก 0.05 เป็น 0.7 เพื่อให้หนักพอที่จะตก
+	0.3,   -- Friction: เพิ่มจาก 0.05 เป็น 0.3 เพื่อหยุดเร็วขึ้น
+	0.1,   -- Elasticity: ลดจาก 0.3 เป็น 0.1 เพื่อลดการเด้ง
+	1.0,   -- FrictionWeight
+	1.0    -- ElasticityWeight
 )
 
 -- ตัวแปรติดตามจำนวน debris ที่ active (สำหรับ mobile optimization)
@@ -1655,29 +1656,30 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 
 			nestedPart.Anchored = false
 			nestedPart.CanCollide = true
-			nestedPart.Massless = true
+			nestedPart.Massless = false -- เปลี่ยนเป็น false เพื่อให้มีมวล
 			nestedPart.CustomPhysicalProperties = LIGHT_DEBRIS_PROPERTIES
 
-			-- ลดความแรงกระเด็นบน mobile เพื่อประหยัด physics
+			-- ลดความแรงกระเด็นบน mobile เพื่อประหยัด physics และให้ตกเร็วขึ้น
 			local velocityMultiplier
 			if hasMobilePlayers then
-				velocityMultiplier = (ejectStrength == "strong") and 100 or 60
+				velocityMultiplier = (ejectStrength == "strong") and 35 or 25 -- ลดจาก 100/60
 			else
-				velocityMultiplier = (ejectStrength == "strong") and 150 or 80
+				velocityMultiplier = (ejectStrength == "strong") and 50 or 35 -- ลดจาก 150/80
 			end
 
 			local ejectDirection
 			if rescuePosition then
 				local awayDirection = (nestedPart.Position - rescuePosition).Unit
+				-- ลดแรงขึ้นแนวตั้ง (Y) เพื่อให้ตกเร็วขึ้น
 				ejectDirection = Vector3.new(
-					awayDirection.X + math.random(-5, 5) / 10,
-					math.random(25, 50) / 10,
-					awayDirection.Z + math.random(-5, 5) / 10
+					awayDirection.X + math.random(-3, 3) / 10,
+					math.random(5, 15) / 10, -- ลดจาก 25-50 เป็น 5-15 (ตกเร็วขึ้น)
+					awayDirection.Z + math.random(-3, 3) / 10
 				).Unit
 			else
 				ejectDirection = Vector3.new(
 					math.random(-10, 10) / 10,
-					math.random(25, 50) / 10,
+					math.random(5, 15) / 10, -- ลดจาก 25-50 เป็น 5-15 (ตกเร็วขึ้น)
 					math.random(-10, 10) / 10
 				).Unit
 			end
@@ -1687,9 +1689,9 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 			-- ลดการหมุนบน mobile
 			local rotationMultiplier
 			if hasMobilePlayers then
-				rotationMultiplier = (ejectStrength == "strong") and 10 or 5
+				rotationMultiplier = (ejectStrength == "strong") and 5 or 3 -- ลดจาก 10/5
 			else
-				rotationMultiplier = (ejectStrength == "strong") and 15 or 10
+				rotationMultiplier = (ejectStrength == "strong") and 8 or 5 -- ลดจาก 15/10
 			end
 
 			local randomRotation = Vector3.new(
@@ -1698,6 +1700,11 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 				math.random(-rotationMultiplier, rotationMultiplier)
 			)
 			nestedPart.AssemblyAngularVelocity = randomRotation
+
+			-- SetNetworkOwnershipAuto เพื่อลด lag
+			pcall(function()
+				nestedPart:SetNetworkOwnershipAuto()
+			end)
 
 			-- ใช้ fadeDebris แทน Debris:AddItem เพื่อให้ค่อยๆหายไป
 			if hasMobilePlayers then
@@ -1763,35 +1770,41 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 				connectedPart.Anchored = false
 			end
 			connectedPart.CanCollide = true
-			connectedPart.Massless = true
+			connectedPart.Massless = false -- เปลี่ยนเป็น false เพื่อให้มีมวล
 			connectedPart.CustomPhysicalProperties = LIGHT_DEBRIS_PROPERTIES
 
 			-- กระเด็นทุกครั้ง แต่ความแรงแตกต่างกัน
 			local isMainPart = (connectedPart == part)
 
-			-- กำหนดความแรงตาม ejectStrength
+			-- กำหนดความแรงตาม ejectStrength (ลดลงเพื่อให้ตกเร็วขึ้น)
 			local velocityMultiplier
-			if ejectStrength == "strong" then
-				-- แรงมาก
-				velocityMultiplier = isMainPart and 300 or 150
+			if hasMobilePlayers then
+				if ejectStrength == "strong" then
+					velocityMultiplier = isMainPart and 50 or 35 -- ลดจาก 300/150
+				else
+					velocityMultiplier = isMainPart and 35 or 25 -- ลดจาก 150/80
+				end
 			else
-				-- แรงปานกลาง
-				velocityMultiplier = isMainPart and 150 or 80
+				if ejectStrength == "strong" then
+					velocityMultiplier = isMainPart and 70 or 50 -- ลดจาก 300/150
+				else
+					velocityMultiplier = isMainPart and 50 or 35 -- ลดจาก 150/80
+				end
 			end
 
-			-- คำนวณทิศทางกระเด็นออกจาก Rescue bot
+			-- คำนวณทิศทางกระเด็นออกจาก Rescue bot (ลดแรงขึ้น)
 			local ejectDirection
 			if rescuePosition then
 				local awayDirection = (connectedPart.Position - rescuePosition).Unit
 				ejectDirection = Vector3.new(
-					awayDirection.X + math.random(-5, 5) / 10,
-					math.random(25, 50) / 10,  -- แรงขึ้นสูงมาก (2.5 - 5.0)
-					awayDirection.Z + math.random(-5, 5) / 10
+					awayDirection.X + math.random(-3, 3) / 10,
+					math.random(5, 15) / 10,  -- ลดจาก 25-50 เป็น 5-15 (ตกเร็วขึ้น)
+					awayDirection.Z + math.random(-3, 3) / 10
 				).Unit
 			else
 				ejectDirection = Vector3.new(
 					math.random(-10, 10) / 10,
-					math.random(25, 50) / 10,  -- แรงขึ้นสูงมาก (2.5 - 5.0)
+					math.random(5, 15) / 10,  -- ลดจาก 25-50 เป็น 5-15 (ตกเร็วขึ้น)
 					math.random(-10, 10) / 10
 				).Unit
 			end
@@ -1799,14 +1812,25 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 			-- ใช้ความแรงที่กำหนดไว้
 			connectedPart.AssemblyLinearVelocity = ejectDirection * velocityMultiplier
 
-			-- แรงหมุน (ปรับตาม strength)
-			local rotationMultiplier = (ejectStrength == "strong") and (isMainPart and 30 or 15) or (isMainPart and 20 or 10)
+			-- แรงหมุน (ปรับตาม strength และลดลง)
+			local rotationMultiplier
+			if hasMobilePlayers then
+				rotationMultiplier = (ejectStrength == "strong") and (isMainPart and 8 or 5) or (isMainPart and 5 or 3)
+			else
+				rotationMultiplier = (ejectStrength == "strong") and (isMainPart and 12 or 8) or (isMainPart and 8 or 5)
+			end
+
 			local randomRotation = Vector3.new(
 				math.random(-rotationMultiplier, rotationMultiplier),
 				math.random(-rotationMultiplier, rotationMultiplier),
 				math.random(-rotationMultiplier, rotationMultiplier)
 			)
 			connectedPart.AssemblyAngularVelocity = randomRotation
+
+			-- SetNetworkOwnershipAuto เพื่อลด lag
+			pcall(function()
+				connectedPart:SetNetworkOwnershipAuto()
+			end)
 
 			print("Server ejected:", connectedPart.Name, "IsMainPart:", isMainPart, "Strength:", ejectStrength or "normal", "Velocity:", velocityMultiplier)
 		end
@@ -1995,6 +2019,13 @@ local function startGame()
 	local gameDuration = gameMode.gameDuration
 
 	print(string.format("[Server] Starting game with %d players - Duration: %d seconds", playerCount, gameDuration))
+
+	-- เริ่ม Battery drain สำหรับ RescueBot ทั้งหมด
+	for player, healthInstance in pairs(rescueBotHealthInstances) do
+		if healthInstance then
+			healthInstance:StartBatteryDrain(gameDuration)
+		end
+	end
 
 	-- แจ้งทุก client ว่าเกมเริ่มแล้ว และให้เริ่ม billboard timer (ส่งไปทุกคน)
 	waitingSystemRemote:FireAllClients("gameStarted", gameDuration, playerCount)

@@ -52,6 +52,7 @@ export type RescueBotHealthType = {
 	GetBattery: (self: RescueBotHealthType) -> (number, number),
 	Reset: (self: RescueBotHealthType) -> (),
 	Destroy: (self: RescueBotHealthType) -> (),
+	StartBatteryDrain: (self: RescueBotHealthType, gameDuration: number) -> (),
 	_setupCollisionDetection: (self: RescueBotHealthType) -> (),
 	_setupRockDetection: (self: RescueBotHealthType) -> (),
 	_startBatteryDrain: (self: RescueBotHealthType) -> (),
@@ -236,8 +237,8 @@ function RescueBotHealth.new(rescueModel: Model, options: ConstructorOptions?): 
 	-- ตรวจจับหินที่ตกหรือกระเด็นใส่
 	self:_setupRockDetection()
 
-	-- Battery Drain (Idle)
-	self:_startBatteryDrain()
+	-- Battery Drain (Idle) - แต่ยังไม่เริ่มทันที จะเริ่มเมื่อเกมเริ่ม
+	-- self:_startBatteryDrain() -- ปิดไว้ก่อน จะเปิดเมื่อเกมเริ่มจริงๆ
 
 	-- ตรวจสอบการ Revive ผ่าน Attribute
 	local attributeConnection = rescueModel:GetAttributeChangedSignal("IsDown"):Connect(function()
@@ -314,7 +315,41 @@ function RescueBotHealth:_setupRockDetection()
 	-- เพื่อลดจำนวน event listeners
 end
 
--- เริ่ม Battery Drain
+-- เริ่ม Battery Drain (เรียกจาก server เมื่อเกมเริ่ม)
+function RescueBotHealth:StartBatteryDrain(gameDuration)
+	local typedSelf = self :: RescueBotHealthType
+
+	-- ถ้า drain อยู่แล้วให้หยุดก่อน
+	if typedSelf._batteryDrainConnection then
+		typedSelf._batteryDrainConnection:Disconnect()
+		typedSelf._batteryDrainConnection = nil
+	end
+
+	-- เช็คว่ามี SolarCell ติดตั้งหรือไม่
+	local hasSolarCell = typedSelf.rescueModel:FindFirstChild("SolarCell", true) ~= nil
+	local maxBattery = hasSolarCell and (GameConfig.RESCUE_BOT.maxBattery * 2) or GameConfig.RESCUE_BOT.maxBattery
+
+	-- คำนวณ battery drain rates จากเวลาเกมจริง
+	local drainRates = GameConfig.calculateBatteryDrain(gameDuration, maxBattery)
+
+	print(string.format("[RescueBotHealth] Starting battery drain for %s - Duration: %ds, SolarCell: %s, MaxBattery: %d, Idle: %.3f/s",
+		typedSelf.rescueModel.Name, gameDuration or 0, tostring(hasSolarCell), maxBattery, drainRates.idle))
+
+	typedSelf._batteryDrainConnection = RunService.Heartbeat:Connect(function(deltaTime)
+		-- Idle drain (ใช้ตลอดเวลา)
+		typedSelf:DrainBattery(drainRates.idle * deltaTime)
+
+		-- TODO: เพิ่มการตรวจสอบสถานะ moving และ drilling
+		-- if isMoving then
+		--     self:DrainBattery(drainRates.moving * deltaTime)
+		-- end
+		-- if isDrilling then
+		--     self:DrainBattery(drainRates.drilling * deltaTime)
+		-- end
+	end)
+end
+
+-- เริ่ม Battery Drain (deprecated - ใช้ StartBatteryDrain แทน)
 function RescueBotHealth:_startBatteryDrain()
 	local typedSelf = self :: RescueBotHealthType
 
@@ -490,9 +525,10 @@ function RescueBotHealth:_onRevived()
 	end
 
 	-- เริ่ม Battery Drain ใหม่ (ถ้าถูกหยุดไว้)
-	if not typedSelf._batteryDrainConnection then
-		typedSelf:_startBatteryDrain()
-	end
+	-- ปิดไว้เพราะ battery drain จะถูกจัดการจาก server ผ่าน StartBatteryDrain
+	-- if not typedSelf._batteryDrainConnection then
+	-- 	typedSelf:_startBatteryDrain()
+	-- end
 end
 
 -- ฟื้น HP
@@ -520,7 +556,8 @@ function RescueBotHealth:Heal(amount: number)
 		end
 
 		-- เริ่ม Battery Drain ใหม่
-		typedSelf:_startBatteryDrain()
+		-- ปิดไว้เพราะ battery drain จะถูกจัดการจาก server ผ่าน StartBatteryDrain
+		-- typedSelf:_startBatteryDrain()
 
 		-- ส่ง event บอก client ว่าฟื้นแล้ว
 		local remoteEvents = ReplicatedStorage:FindFirstChild("RescueBotRemotes")
@@ -657,9 +694,9 @@ function RescueBotHealth:_explodeRescueBot()
 		end
 	end
 
-	-- ทำให้ทุก part กระเด็นออกมา
+	-- ทำให้ทุก part กระเด็นออกมา (ปรับให้ตกเร็วขึ้น ไม่ลอย)
 	local centerPosition = rescueModel.PrimaryPart and rescueModel.PrimaryPart.Position or rescueModel:GetPivot().Position
-	local explosionForce = 100 -- แรงระเบิด (ลดลงเพื่อไม่ให้กระเด็นไกลเกินไป)
+	local explosionForce = 35 -- แรงระเบิด (ลดจาก 100 เป็น 35 เพื่อให้ตกเร็วขึ้น)
 	local groundY = centerPosition.Y -- เก็บ Y ของพื้น
 
 	for _, descendant in ipairs(rescueModel:GetDescendants()) do
@@ -668,50 +705,44 @@ function RescueBotHealth:_explodeRescueBot()
 			descendant.Anchored = false
 			descendant.CanCollide = true
 
-			-- ตั้งค่า physics properties
+			-- ตั้งค่า physics properties (เพิ่มมวลและ friction เพื่อให้ตกเร็วขึ้น)
 			pcall(function()
 				descendant.CustomPhysicalProperties = PhysicalProperties.new(
-					0.5,  -- Density (เพิ่มความหนักเล็กน้อย)
-					0.5,  -- Friction
-					0.3,  -- Elasticity (ลดการตีกลับ)
+					0.7,  -- Density (เพิ่มจาก 0.5 เป็น 0.7 เพื่อให้หนักขึ้น)
+					0.3,  -- Friction (ลดจาก 0.5 เป็น 0.3)
+					0.1,  -- Elasticity (ลดจาก 0.3 เป็น 0.1 เพื่อลดการเด้ง)
 					1,    -- FrictionWeight
 					1     -- ElasticityWeight
 				)
 			end)
 
-			-- คำนวณทิศทางกระเด็นออกจากศูนย์กลาง (แนวนอนเป็นหลัก)
+			-- คำนวณทิศทางกระเด็นออกจากศูนย์กลาง (ลดแรงขึ้น)
 			local direction = (descendant.Position - centerPosition).Unit
 			local randomOffset = Vector3.new(
-				math.random(-50, 50) / 100,
-				math.random(10, 50) / 100, -- กระเด็นขึ้นบนเล็กน้อย
-				math.random(-50, 50) / 100
+				math.random(-30, 30) / 100, -- ลดจาก -50,50
+				math.random(5, 20) / 100,   -- ลดจาก 10-50 เป็น 5-20 (กระเด็นขึ้นน้อยลง)
+				math.random(-30, 30) / 100  -- ลดจาก -50,50
 			)
 			local finalDirection = (direction + randomOffset).Unit
 
-			-- ใช้ AssemblyLinearVelocity (กระเด็นในแนวนอนเป็นหลัก)
+			-- ใช้ AssemblyLinearVelocity (ลดแรงกระเด็น)
 			local horizontalForce = Vector3.new(finalDirection.X, 0, finalDirection.Z).Unit * explosionForce
-			local verticalForce = Vector3.new(0, math.random(30, 60), 0) -- กระเด็นขึ้นเล็กน้อย
+			local verticalForce = Vector3.new(0, math.random(10, 25), 0) -- ลดจาก 30-60 เป็น 10-25
 			descendant.AssemblyLinearVelocity = horizontalForce + verticalForce
 
-			-- ให้หมุนสุ่ม
+			-- ให้หมุนสุ่ม (ลดลง)
 			descendant.AssemblyAngularVelocity = Vector3.new(
-				math.random(-15, 15),
-				math.random(-15, 15),
-				math.random(-15, 15)
+				math.random(-8, 8),  -- ลดจาก -15,15
+				math.random(-8, 8),
+				math.random(-8, 8)
 			)
 
-			-- สร้าง BodyVelocity เพื่อไม่ให้ตกลงไปนอกแมพ (จะค่อยๆ ลดความเร็ว)
-			task.delay(0.5, function()
-				if descendant and descendant.Parent then
-					-- หยุดการตกลงไปเรื่อยๆ หลังจากระเบิด 0.5 วินาที
-					local currentVelocity = descendant.AssemblyLinearVelocity
-					descendant.AssemblyLinearVelocity = Vector3.new(
-						currentVelocity.X * 0.5,
-						math.max(currentVelocity.Y, -10), -- จำกัดความเร็วตกลง
-						currentVelocity.Z * 0.5
-					)
-				end
+			-- SetNetworkOwnershipAuto เพื่อลด lag
+			pcall(function()
+				descendant:SetNetworkOwnershipAuto()
 			end)
+
+			-- ลบการใช้ task.delay เพื่อหยุด velocity (ให้ตกตามธรรมชาติ)
 		end
 	end
 
