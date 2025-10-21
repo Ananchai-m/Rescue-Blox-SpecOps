@@ -31,6 +31,7 @@ local canDrill = true
 local currentDrillSound = nil -- เก็บ Sound instance ปัจจุบัน
 local drillSoundStopTimer = nil -- Timer สำหรับหยุดเสียงแบบ fade
 local isFadingOut = false -- สถานะการ fade out
+local lastDrillClickTime = 0 -- เก็บเวลาคลิกครั้งล่าสุด
 
 local rescueRemotes = ReplicatedStorage:WaitForChild("RescueBotRemotes")
 local botDeathRemote = rescueRemotes:WaitForChild("BotDeath")
@@ -601,6 +602,19 @@ local function disableDrillEffects()
 	end
 end
 
+-- ฟังก์ชันหยุดเสียงเจาะทันที (ไม่ fade)
+local function stopDrillSoundImmediately()
+	if currentDrillSound then
+		currentDrillSound:Stop()
+		currentDrillSound:Destroy()
+		currentDrillSound = nil
+	end
+	isFadingOut = false
+
+	-- ส่งสัญญาณหยุดเสียงเจาะไปยัง server
+	drillSoundRemote:FireServer("stop")
+end
+
 -- ฟังก์ชัน fade out เสียงเจาะ
 local function fadeDrillSound()
 	if not currentDrillSound or not currentDrillSound.IsPlaying then
@@ -612,25 +626,35 @@ local function fadeDrillSound()
 	end
 
 	isFadingOut = true
-	local startVolume = currentDrillSound.Volume
-	local fadeTime = 0.3 -- 300ms
-	local steps = 10
+	local sound = currentDrillSound -- เก็บ reference
+	local fadeTime = 0.1 -- ลดเหลือ 0.1 วินาที (100ms) เพื่อให้เร็วขึ้น
+	local steps = 3 -- ลดเหลือ 3 steps
 	local stepTime = fadeTime / steps
+	local startVolume = sound.Volume
 	local volumeDecrement = startVolume / steps
 
 	task.spawn(function()
 		for i = 1, steps do
-			if not currentDrillSound or not currentDrillSound.Parent then
+			-- ถ้ามีการคลิกใหม่ (lastDrillClickTime เปลี่ยน) ให้ยกเลิก fade
+			if tick() - lastDrillClickTime < 0.15 then
+				isFadingOut = false
+				if sound and sound.Parent then
+					sound.Volume = 0.5 -- คืนค่า volume
+				end
+				return
+			end
+
+			if not sound or not sound.Parent then
 				break
 			end
-			currentDrillSound.Volume = math.max(0, currentDrillSound.Volume - volumeDecrement)
+			sound.Volume = math.max(0, sound.Volume - volumeDecrement)
 			task.wait(stepTime)
 		end
 
-		-- หยุดและลบเสียง
-		if currentDrillSound then
-			currentDrillSound:Stop()
-			currentDrillSound:Destroy()
+		-- หยุดและลบเสียง (เช็คว่ายังเป็น sound instance เดิม)
+		if sound and sound == currentDrillSound then
+			sound:Stop()
+			sound:Destroy()
 			currentDrillSound = nil
 		end
 		isFadingOut = false
@@ -658,13 +682,7 @@ if playerGui then
 			destroyDrillGui()
 
 			-- หยุดเสียงเจาะเมื่อเกมจบ
-			if currentDrillSound then
-				currentDrillSound:Stop()
-				currentDrillSound:Destroy()
-				currentDrillSound = nil
-				drillSoundRemote:FireServer("stop")
-			end
-			isFadingOut = false
+			stopDrillSoundImmediately()
 		end
 	end)
 
@@ -823,6 +841,12 @@ function DrillSystem.handleDrillingClick(clickPosition)
 
 	-- เล่นเสียงเจาะเฉพาะเมื่อไม่มีเสียงกำลังเล่นอยู่
 	if drillArmPart then
+		-- ยกเลิก fade timer ทันทีเมื่อคลิกใหม่
+		if drillSoundStopTimer then
+			task.cancel(drillSoundStopTimer)
+			drillSoundStopTimer = nil
+		end
+
 		if not currentDrillSound or not currentDrillSound.IsPlaying or isFadingOut then
 			-- ลบเสียงเก่าถ้ามี
 			if currentDrillSound then
@@ -844,9 +868,11 @@ function DrillSystem.handleDrillingClick(clickPosition)
 			-- ส่งสัญญาณเสียงเจาะไปยัง server
 			drillSoundRemote:FireServer("start")
 		elseif currentDrillSound and isFadingOut then
-			-- ถ้ากำลัง fade out อยู่ ให้ฟื้นฟู volume
+			-- ถ้ากำลัง fade out อยู่ ให้ฟื้นฟู volume และยกเลิก fade
 			isFadingOut = false
 			currentDrillSound.Volume = 0.5 -- ลดเสียงลง 50%
+		elseif currentDrillSound and currentDrillSound.IsPlaying then
+			-- ถ้าเสียงกำลังเล่นอยู่ แค่ยกเลิก fade timer (ไม่ต้องทำอะไร)
 		end
 	end
 
@@ -868,13 +894,20 @@ function DrillSystem.handleDrillingClick(clickPosition)
 		drillEffectStopTimer = nil
 	end)
 
+	-- อัพเดตเวลาคลิกครั้งล่าสุด
+	lastDrillClickTime = tick()
+
 	-- ตั้ง timer สำหรับ fade out เสียงเจาะ
 	if drillSoundStopTimer then
 		task.cancel(drillSoundStopTimer)
 	end
 
-	drillSoundStopTimer = task.delay(0.5, function()
-		fadeDrillSound()
+	drillSoundStopTimer = task.delay(0.2, function() -- ลดจาก 0.3 เป็น 0.2 วินาที
+		-- ตรวจสอบว่าผ่านมาแล้วอย่างน้อย 0.2 วินาทีจากการคลิกครั้งล่าสุด
+		local timeSinceLastClick = tick() - lastDrillClickTime
+		if timeSinceLastClick >= 0.2 then
+			fadeDrillSound()
+		end
 		drillSoundStopTimer = nil
 	end)
 
@@ -915,14 +948,7 @@ function DrillSystem.setDrillEnabled(isEnabled: boolean)
 		disableDrillEffects()
 		destroyDrillGui()
 		-- หยุดเสียงเจาะทันที
-		if currentDrillSound then
-			currentDrillSound:Stop()
-			currentDrillSound:Destroy()
-			currentDrillSound = nil
-			-- ส่งสัญญาณหยุดเสียงไปยัง server
-			drillSoundRemote:FireServer("stop")
-		end
-		isFadingOut = false
+		stopDrillSoundImmediately()
 	end
 end
 
@@ -978,13 +1004,7 @@ player.CharacterAdded:Connect(function(newCharacter)
 	hideDrillProgress()
 
 	-- หยุดเสียงเจาะถ้ามี
-	if currentDrillSound then
-		currentDrillSound:Stop()
-		currentDrillSound:Destroy()
-		currentDrillSound = nil
-		drillSoundRemote:FireServer("stop")
-	end
-	isFadingOut = false
+	stopDrillSoundImmediately()
 end)
 
 -- Listen for drill complete events from server (for coin effects)
@@ -1081,6 +1101,8 @@ end)
 
 -- Track other players' drill sounds
 local otherPlayersDrillSounds = {}
+local otherPlayersSoundTimers = {} -- Timer สำหรับ fade เสียงของผู้เล่นอื่น
+local otherPlayersLastSoundTime = {} -- เวลาที่ได้รับสัญญาณครั้งล่าสุด
 
 -- Handle drill sound from other players
 drillSoundRemote.OnClientEvent:Connect(function(otherPlayer, action)
@@ -1105,6 +1127,20 @@ drillSoundRemote.OnClientEvent:Connect(function(otherPlayer, action)
 	local playerKey = otherPlayer.UserId
 
 	if action == "start" then
+		-- อัพเดตเวลาที่ได้รับสัญญาณครั้งล่าสุด
+		otherPlayersLastSoundTime[playerKey] = tick()
+
+		-- ยกเลิก timer เก่าถ้ามี
+		if otherPlayersSoundTimers[playerKey] then
+			task.cancel(otherPlayersSoundTimers[playerKey])
+			otherPlayersSoundTimers[playerKey] = nil
+		end
+
+		-- ถ้ามีเสียงอยู่แล้ว ไม่ต้องสร้างใหม่
+		if otherPlayersDrillSounds[playerKey] and otherPlayersDrillSounds[playerKey].IsPlaying then
+			return
+		end
+
 		-- Stop and remove old sound if exists
 		if otherPlayersDrillSounds[playerKey] then
 			otherPlayersDrillSounds[playerKey]:Stop()
@@ -1124,43 +1160,79 @@ drillSoundRemote.OnClientEvent:Connect(function(otherPlayer, action)
 		print(string.format("[DrillSound] Started drill sound for %s", otherPlayer.Name))
 
 	elseif action == "stop" then
-		-- Fade out and stop sound
-		if otherPlayersDrillSounds[playerKey] then
-			local sound = otherPlayersDrillSounds[playerKey]
-			local startVolume = sound.Volume
-			local fadeTime = 0.3
-			local steps = 10
-			local stepTime = fadeTime / steps
-			local volumeDecrement = startVolume / steps
+		-- ใช้ delay timer เหมือนตัวเอง เพื่อป้องกันเสียงเด้งๆ
+		otherPlayersLastSoundTime[playerKey] = tick()
 
-			task.spawn(function()
-				for i = 1, steps do
-					if not sound or not sound.Parent then
-						break
-					end
-					sound.Volume = math.max(0, sound.Volume - volumeDecrement)
-					task.wait(stepTime)
-				end
-
-				if sound then
-					sound:Stop()
-					sound:Destroy()
-				end
-				otherPlayersDrillSounds[playerKey] = nil
-				print(string.format("[DrillSound] Stopped drill sound for %s", otherPlayer.Name))
-			end)
+		-- ยกเลิก timer เก่าถ้ามี
+		if otherPlayersSoundTimers[playerKey] then
+			task.cancel(otherPlayersSoundTimers[playerKey])
 		end
+
+		-- ตั้ง timer ใหม่
+		otherPlayersSoundTimers[playerKey] = task.delay(0.2, function()
+			-- ตรวจสอบว่าผ่านมาแล้ว 0.2s จากสัญญาณครั้งล่าสุด
+			local timeSinceLastSignal = tick() - (otherPlayersLastSoundTime[playerKey] or 0)
+			if timeSinceLastSignal < 0.2 then
+				return -- ยังไม่ถึงเวลา (อาจจะมีสัญญาณใหม่เข้ามา)
+			end
+
+			-- Fade out and stop sound (เร็วขึ้นเหมือนตัวเอง)
+			if otherPlayersDrillSounds[playerKey] then
+				local sound = otherPlayersDrillSounds[playerKey]
+				local startVolume = sound.Volume
+				local fadeTime = 0.1 -- ลดเหลือ 0.1 วินาที เหมือนตัวเอง
+				local steps = 3 -- ลดเหลือ 3 steps เหมือนตัวเอง
+				local stepTime = fadeTime / steps
+				local volumeDecrement = startVolume / steps
+
+				task.spawn(function()
+					for i = 1, steps do
+						-- ถ้ามีสัญญาณ start ใหม่ ให้ยกเลิก fade
+						local currentTime = tick()
+						if currentTime - (otherPlayersLastSoundTime[playerKey] or 0) < 0.15 then
+							return -- มีสัญญาณใหม่เข้ามา ยกเลิก fade
+						end
+
+						if not sound or not sound.Parent then
+							break
+						end
+						sound.Volume = math.max(0, sound.Volume - volumeDecrement)
+						task.wait(stepTime)
+					end
+
+					if sound then
+						sound:Stop()
+						sound:Destroy()
+					end
+					otherPlayersDrillSounds[playerKey] = nil
+					print(string.format("[DrillSound] Stopped drill sound for %s", otherPlayer.Name))
+				end)
+			end
+
+			otherPlayersSoundTimers[playerKey] = nil
+		end)
 	end
 end)
 
 -- Clean up sounds when player leaves
 Players.PlayerRemoving:Connect(function(leavingPlayer)
 	local playerKey = leavingPlayer.UserId
+
+	-- หยุดและลบเสียง
 	if otherPlayersDrillSounds[playerKey] then
 		otherPlayersDrillSounds[playerKey]:Stop()
 		otherPlayersDrillSounds[playerKey]:Destroy()
 		otherPlayersDrillSounds[playerKey] = nil
 	end
+
+	-- ยกเลิก timer
+	if otherPlayersSoundTimers[playerKey] then
+		task.cancel(otherPlayersSoundTimers[playerKey])
+		otherPlayersSoundTimers[playerKey] = nil
+	end
+
+	-- ลบข้อมูลเวลา
+	otherPlayersLastSoundTime[playerKey] = nil
 end)
 
 return DrillSystem
