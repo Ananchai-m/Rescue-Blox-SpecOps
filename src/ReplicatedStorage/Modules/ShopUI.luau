@@ -4,6 +4,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 
 -- Import TopbarPlus
 local TopbarPlus = require(ReplicatedStorage.Packages.TopbarPlus)
@@ -19,6 +20,14 @@ local shopFrame = nil
 local shopIcon = nil -- เปลี่ยนจาก shopButton เป็น shopIcon
 local isShopOpen = false
 local isAnimating = false
+
+-- ตัวแปรสำหรับระบบเลื่อน
+local currentPage = 1
+local itemsPerPage = 4
+local itemCards = {}
+local scrollingFrame = nil
+local leftArrow = nil
+local rightArrow = nil
 
 local function formatItemName(text, breakName)
 	local value = text and text ~= "" and text or "Item"
@@ -69,6 +78,35 @@ local function ensureShopIcon()
 	end
 
 	return createShopIcon()
+end
+
+-- ฟังก์ชันอัปเดตสถานะปุ่มลูกศร (ประกาศก่อนเพื่อให้ createShopUI ใช้ได้)
+local function updateArrowStates()
+	if not leftArrow or not rightArrow then return end
+
+	local totalItems = #itemCards
+	local totalPages = math.ceil(totalItems / itemsPerPage)
+
+	if totalPages <= 1 then
+		leftArrow.Visible = false
+		rightArrow.Visible = false
+		return
+	end
+
+	leftArrow.Visible = true
+	rightArrow.Visible = true
+
+	if currentPage <= 1 then
+		leftArrow.BackgroundTransparency = 0.7
+	else
+		leftArrow.BackgroundTransparency = 0.3
+	end
+
+	if currentPage >= totalPages then
+		rightArrow.BackgroundTransparency = 0.7
+	else
+		rightArrow.BackgroundTransparency = 0.3
+	end
 end
 
 -- ฟังก์ชันสร้าง Shop UI
@@ -233,29 +271,67 @@ local function createShopUI()
 		ShopUI.closeShop()
 	end)
 
-	-- สร้าง Content Area (สำหรับใส่ items)
+	-- สร้าง Content Container
+	local contentContainer = Instance.new("Frame")
+	contentContainer.Name = "ContentContainer"
+	contentContainer.Size = UDim2.fromScale(0.96, 0.82)
+	contentContainer.Position = UDim2.fromScale(0.02, 0.16)
+	contentContainer.BackgroundTransparency = 1
+	contentContainer.BorderSizePixel = 0
+	contentContainer.Parent = shopFrame
+
+	-- สร้าง ScrollingFrame แนวนอน
 	local contentFrame = Instance.new("ScrollingFrame")
 	contentFrame.Name = "Content"
-	contentFrame.Size = UDim2.fromScale(0.96, 0.82)
-	contentFrame.Position = UDim2.fromScale(0.02, 0.16)
+	contentFrame.Size = UDim2.fromScale(0.9, 1)
+	contentFrame.Position = UDim2.fromScale(0.05, 0)
 	contentFrame.BackgroundTransparency = 1
 	contentFrame.BorderSizePixel = 0
-	contentFrame.ScrollBarThickness = 4
+	contentFrame.ScrollBarThickness = 0
 	contentFrame.CanvasSize = UDim2.fromScale(0, 0)
-	contentFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	contentFrame.AutomaticCanvasSize = Enum.AutomaticSize.X
+	contentFrame.ScrollingDirection = Enum.ScrollingDirection.X
 	contentFrame.ScrollBarImageColor3 = Color3.fromRGB(190, 195, 205)
-	contentFrame.Parent = shopFrame
+	contentFrame.Parent = contentContainer
 
-	-- สร้าง Grid Layout
-	local gridLayout = Instance.new("UIGridLayout")
-	gridLayout.CellSize = UDim2.fromScale(0.23, 0.9)
-	gridLayout.CellPadding = UDim2.fromScale(0.02, 0.02)
-	gridLayout.FillDirection = Enum.FillDirection.Horizontal
-	gridLayout.FillDirectionMaxCells = 4
-	gridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-	gridLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-	gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	gridLayout.Parent = contentFrame
+	scrollingFrame = contentFrame
+
+	-- ตรวจจับการ scroll ด้วยนิ้วเพื่ออัปเดต currentPage
+	contentFrame:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+		if #itemCards == 0 then return end
+
+		-- คำนวณว่าอยู่หน้าไหนจาก CanvasPosition
+		local scrollPosition = contentFrame.CanvasPosition.X
+		local itemWidth = 0
+
+		if itemCards[1] then
+			itemWidth = itemCards[1].AbsoluteSize.X
+		end
+
+		if itemWidth > 0 then
+			local listLayout = contentFrame:FindFirstChildOfClass("UIListLayout")
+			local spacing = 0
+			if listLayout and listLayout.Padding then
+				spacing = listLayout.Padding.Scale * contentFrame.AbsoluteCanvasSize.X
+			end
+
+			local itemTotalWidth = itemWidth + spacing
+			local estimatedPage = math.floor(scrollPosition / itemTotalWidth) + 1
+			local totalPages = math.ceil(#itemCards / itemsPerPage)
+
+			currentPage = math.clamp(estimatedPage, 1, totalPages)
+			updateArrowStates()
+		end
+	end)
+
+	-- สร้าง List Layout แนวนอน
+	local listLayout = Instance.new("UIListLayout")
+	listLayout.FillDirection = Enum.FillDirection.Horizontal
+	listLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+	listLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	listLayout.Padding = UDim.new(0.02, 0)
+	listLayout.Parent = contentFrame
 
 	-- เพิ่ม Padding
 	local padding = Instance.new("UIPadding")
@@ -265,14 +341,149 @@ local function createShopUI()
 	padding.PaddingRight = UDim.new(0.01, 0)
 	padding.Parent = contentFrame
 
+	-- เพิ่ม spacer ท้าย canvas เพื่อให้ item สุดท้ายเลื่อนมาชิดซ้ายได้
+	local spacer = Instance.new("Frame")
+	spacer.Name = "Spacer"
+	spacer.Size = UDim2.fromScale(0.22, 1)
+	spacer.BackgroundTransparency = 1
+	spacer.LayoutOrder = 9999
+	spacer.Parent = contentFrame
+
+	-- สร้างปุ่มลูกศรซ้าย
+	leftArrow = Instance.new("TextButton")
+	leftArrow.Name = "LeftArrow"
+	leftArrow.Size = UDim2.fromScale(0.04, 0.08)
+	leftArrow.Position = UDim2.fromScale(0.005, 0.5)
+	leftArrow.AnchorPoint = Vector2.new(0, 0.5)
+	leftArrow.BackgroundColor3 = Color3.fromRGB(101, 105, 115)
+	leftArrow.BackgroundTransparency = 0.3
+	leftArrow.BorderSizePixel = 0
+	leftArrow.Font = Enum.Font.GothamBold
+	leftArrow.Text = "<"
+	leftArrow.TextColor3 = Color3.fromRGB(255, 255, 255)
+	leftArrow.TextScaled = true
+	leftArrow.Parent = contentContainer
+
+	local leftCorner = Instance.new("UICorner")
+	leftCorner.CornerRadius = UDim.new(0.3, 0)
+	leftCorner.Parent = leftArrow
+
+	local leftConstraint = Instance.new("UITextSizeConstraint")
+	leftConstraint.MaxTextSize = 24
+	leftConstraint.MinTextSize = 16
+	leftConstraint.Parent = leftArrow
+
+	-- สร้างปุ่มลูกศรขวา
+	rightArrow = Instance.new("TextButton")
+	rightArrow.Name = "RightArrow"
+	rightArrow.Size = UDim2.fromScale(0.04, 0.08)
+	rightArrow.Position = UDim2.fromScale(0.995, 0.5)
+	rightArrow.AnchorPoint = Vector2.new(1, 0.5)
+	rightArrow.BackgroundColor3 = Color3.fromRGB(101, 105, 115)
+	rightArrow.BackgroundTransparency = 0.3
+	rightArrow.BorderSizePixel = 0
+	rightArrow.Font = Enum.Font.GothamBold
+	rightArrow.Text = ">"
+	rightArrow.TextColor3 = Color3.fromRGB(255, 255, 255)
+	rightArrow.TextScaled = true
+	rightArrow.Parent = contentContainer
+
+	local rightCorner = Instance.new("UICorner")
+	rightCorner.CornerRadius = UDim.new(0.3, 0)
+	rightCorner.Parent = rightArrow
+
+	local rightConstraint = Instance.new("UITextSizeConstraint")
+	rightConstraint.MaxTextSize = 24
+	rightConstraint.MinTextSize = 16
+	rightConstraint.Parent = rightArrow
+
+	-- เพิ่มระบบ drag ใน ContentContainer
+	local isDragging = false
+	local dragStartPos = nil
+	local dragStartCanvasPos = nil
+
+	contentContainer.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			isDragging = true
+			dragStartPos = input.Position
+			dragStartCanvasPos = contentFrame.CanvasPosition
+		end
+	end)
+
+	contentContainer.InputChanged:Connect(function(input)
+		if not isDragging then return end
+
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+			local delta = dragStartPos.X - input.Position.X
+			local newCanvasPos = dragStartCanvasPos.X + delta
+
+			-- จำกัดไม่ให้เลื่อนเกินขอบ
+			local maxScroll = math.max(0, contentFrame.AbsoluteCanvasSize.X - contentFrame.AbsoluteSize.X)
+			newCanvasPos = math.clamp(newCanvasPos, 0, maxScroll)
+
+			contentFrame.CanvasPosition = Vector2.new(newCanvasPos, 0)
+		end
+	end)
+
+	contentContainer.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			isDragging = false
+			dragStartPos = nil
+			dragStartCanvasPos = nil
+		end
+	end)
+
 	print("Shop UI created successfully")
 	return shopScreenGui
+end
+
+-- ฟังก์ชันเลื่อนไปยังหน้า
+local function scrollToPage(page)
+	if not scrollingFrame or #itemCards == 0 then return end
+
+	local totalPages = math.ceil(#itemCards / itemsPerPage)
+	local targetPage = math.clamp(page, 1, totalPages)
+	currentPage = targetPage
+
+	-- คำนวณ item แรกของหน้านั้น
+	local firstItemIndex = (targetPage - 1) * itemsPerPage + 1
+	local targetCard = itemCards[firstItemIndex]
+
+	if targetCard then
+		-- คำนวณตำแหน่งให้ item แรกของหน้าแสดงชิดซ้าย
+		local cardPositionInCanvas = targetCard.AbsolutePosition.X - scrollingFrame.AbsolutePosition.X + scrollingFrame.CanvasPosition.X
+
+		-- เอา padding ซ้ายออกเพื่อให้ชิดซ้ายพอดี
+		local padding = scrollingFrame:FindFirstChildOfClass("UIPadding")
+		local leftPadding = 0
+
+		if padding and padding.PaddingLeft then
+			leftPadding = padding.PaddingLeft.Scale * scrollingFrame.AbsoluteCanvasSize.X
+		end
+
+		local targetPosition = cardPositionInCanvas - leftPadding
+
+		-- จำกัดไม่ให้เลื่อนเกินขอบ
+		local maxScroll = math.max(0, scrollingFrame.AbsoluteCanvasSize.X - scrollingFrame.AbsoluteSize.X)
+		targetPosition = math.clamp(targetPosition, 0, maxScroll)
+
+		local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		local tween = TweenService:Create(scrollingFrame, tweenInfo, {
+			CanvasPosition = Vector2.new(targetPosition, 0)
+		})
+		tween:Play()
+
+		print(("[ShopUI] Scrolled to page %d (item %d)"):format(targetPage, firstItemIndex))
+	end
+
+	updateArrowStates()
 end
 
 -- ฟังก์ชันสร้าง Item Card (สำหรับแต่ละสินค้า)
 local function createItemCard(itemData)
 	local card = Instance.new("Frame")
 	card.Name = "ItemCard"
+	card.Size = UDim2.fromScale(0.22, 0.95)
 	card.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 	card.BorderSizePixel = 0
 	card.LayoutOrder = itemData.order or 0
@@ -529,10 +740,18 @@ function ShopUI.addItem(itemData)
 		createShopUI()
 	end
 
-	local contentFrame = shopScreenGui:FindFirstChild("ShopFrame"):FindFirstChild("Content")
+	local shopFrameInstance = shopScreenGui:FindFirstChild("ShopFrame")
+	if not shopFrameInstance then return end
+
+	local contentContainer = shopFrameInstance:FindFirstChild("ContentContainer")
+	if not contentContainer then return end
+
+	local contentFrame = contentContainer:FindFirstChild("Content")
 	if contentFrame then
 		local itemCard = createItemCard(itemData)
 		itemCard.Parent = contentFrame
+		table.insert(itemCards, itemCard)
+		updateArrowStates()
 	end
 end
 
@@ -544,13 +763,26 @@ function ShopUI.init()
 	-- สร้าง UI (แต่ยังไม่แสดง)
 	createShopUI()
 
+	-- เชื่อมต่อปุ่มลูกศร
+	if leftArrow then
+		leftArrow.MouseButton1Click:Connect(function()
+			scrollToPage(currentPage - 1)
+		end)
+	end
+
+	if rightArrow then
+		rightArrow.MouseButton1Click:Connect(function()
+			scrollToPage(currentPage + 1)
+		end)
+	end
+
 	-- เพิ่มสินค้าตัวอย่าง
 	ShopUI.addItem({
 		order = 1,
 		name = "Starter Pack",
 		features = {"Special hard hat"},
 		priceDisplay = "R$ 99",
-		image = "",
+		image = "rbxassetid://83670893385280",
 		imageBackgroundColor = Color3.fromRGB(245, 223, 140)
 	})
 
@@ -562,7 +794,7 @@ function ShopUI.init()
 			"Zoom 3x-5x Camera"
 		},
 		priceDisplay = "R$ 299",
-		image = "",
+		image = "rbxassetid://121210617940153",
 		imageBackgroundColor = Color3.fromRGB(204, 208, 217)
 	})
 
@@ -571,7 +803,7 @@ function ShopUI.init()
 		name = "Robot Upgrade Pack",
 		features = {"Solar Cell"},
 		priceDisplay = "R$ 799",
-		image = "",
+		image = "rbxassetid://92408622041483",
 		imageBackgroundColor = Color3.fromRGB(201, 206, 210)
 	})
 
@@ -580,8 +812,17 @@ function ShopUI.init()
 		name = "VIP Hero Pack",
 		features = {"Attack Everyone"},
 		priceDisplay = "R$ 1,499 - 1,999",
-		image = "",
+		image = "rbxassetid://74329715725631",
 		imageBackgroundColor = Color3.fromRGB(218, 220, 230)
+	})
+
+	ShopUI.addItem({
+		order = 5,
+		name = "Kit Heal",
+		features = {"Heal yourself", "Quick recovery"},
+		priceDisplay = "R$ 199",
+		image = "rbxassetid://137702011953812",
+		imageBackgroundColor = Color3.fromRGB(255, 182, 193)
 	})
 
 	print("ShopUI initialized")
