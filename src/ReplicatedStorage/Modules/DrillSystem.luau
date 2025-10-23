@@ -416,6 +416,28 @@ local function findConnectedParts(startPart, visitedParts, maxDepth)
 		end
 	end
 
+	-- ถ้า startPart เป็น Model ให้เพิ่มทุก children ที่เป็น breakable parts
+	if startPart:IsA("Model") and #startPart:GetChildren() > 0 then
+		for _, child in ipairs(startPart:GetDescendants()) do
+			if (child:IsA("BasePart") or child:IsA("MeshPart")) and child.Anchored and not visitedParts[child] then
+				-- ตรวจสอบว่า child อยู่ใน Obstacles folder
+				local childIsInObstacles = false
+				local childAncestor = child.Parent
+				while childAncestor and childAncestor ~= workspace do
+					if childAncestor.Name == "Obstacles" then
+						childIsInObstacles = true
+						break
+					end
+					childAncestor = childAncestor.Parent
+				end
+
+				if childIsInObstacles then
+					visitedParts[child] = true
+				end
+			end
+		end
+	end
+
 	return visitedParts
 end
 

@@ -1667,29 +1667,34 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 
 	local directChildren = {}
 	local parentContainer = part.Parent
-	for _, child in ipairs(part:GetChildren()) do
+	for _, child in ipairs(part:GetDescendants()) do
 		if isBreakablePart(child) and child.Name ~= "Root" then
-			table.insert(directChildren, child)
+			-- ใส่เฉพาะ parts ระดับล่างสุดเพื่อหลีกเลี่ยงการซ้ำซ้อน
+			if #child:GetChildren() == 0 or (not child:FindFirstChildWhichIsA("BasePart") and not child:FindFirstChildWhichIsA("MeshPart")) then
+				table.insert(directChildren, child)
+			end
 		end
 	end
-
 	if #directChildren > 0 then
 		print(string.format("Breakable hierarchy detected - Main: %s | Nested parts: %d", part.Name, #directChildren))
+
+		local originalCount = #directChildren
+		local mobileReducedCount = originalCount -- ค่าเริ่มต้น
 
 		-- Reduce debris count for mobile optimization (keep only 50% of parts)
 		if hasMobilePlayers and #directChildren > 3 then
 			local reduceMultiplier = GameConfig.MOBILE_PERFORMANCE.REDUCE_DEBRIS_COUNT
-			local reducedCount = math.max(3, math.floor(#directChildren * reduceMultiplier))
+			mobileReducedCount = math.max(3, math.floor(#directChildren * reduceMultiplier))
 			local tempChildren = {}
-			for i = 1, reducedCount do
+			for i = 1, mobileReducedCount do
 				table.insert(tempChildren, directChildren[i])
 			end
 			-- Destroy the rest immediately
-			for i = reducedCount + 1, #directChildren do
+			for i = mobileReducedCount + 1, #directChildren do
 				directChildren[i]:Destroy()
 			end
 			directChildren = tempChildren
-			print(string.format("[Mobile Optimization] Reduced debris from %d to %d parts", #directChildren + (#tempChildren - reducedCount), #directChildren))
+			print(string.format("[Mobile Optimization] Reduced debris from %d to %d parts", originalCount, #directChildren))
 		end
 
 		-- Check debris limit สำหรับ mobile (ถ้าเกินให้ลบของเก่าทิ้งก่อน)
@@ -1704,22 +1709,35 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 				directChildren[i]:Destroy()
 			end
 			directChildren = tempChildren
+			print(string.format("[Mobile Optimization] Further reduced debris from %d to %d parts due to limit", mobileReducedCount, #directChildren))
 		end
 
 		for _, nestedPart in ipairs(directChildren) do
-			if nestedPart.Parent ~= workspace then
+			-- ให้แน่ใจว่า part แยกจาก parent เดิมอย่างถูกต้อง
+			if nestedPart.Parent then
+				local originalParent = nestedPart.Parent
+				nestedPart.Parent = nil
+				task.wait() -- รอ 1 เฟรมเพื่อให้แน่ใจว่าแยกสำเร็จ
 				nestedPart.Parent = parentContainer or workspace
+				print(string.format("Moved %s from %s to %s", nestedPart.Name, originalParent.Name, (parentContainer or workspace).Name))
+			else
+				nestedPart.Parent = parentContainer or workspace
+				print(string.format("Set parent for %s to %s", nestedPart.Name, (parentContainer or workspace).Name))
 			end
 
+			-- ให้แน่ใจว่าค่าฟิสิกส์ของ part ถูกต้อง
 			nestedPart.Anchored = false
 			nestedPart.CanCollide = true
 			nestedPart.Massless = false -- เปลี่ยนเป็น false เพื่อให้มีมวล
 			nestedPart.CustomPhysicalProperties = LIGHT_DEBRIS_PROPERTIES
 
-			-- Unanchor ทุก Children ที่อยู่ข้างใน (MeshPart/BasePart)
+			-- ให้แน่ใจว่า sub-parts ทั้งหมดถูกตั้งค่าถูกต้อง
 			for _, child in ipairs(nestedPart:GetDescendants()) do
 				if child:IsA("BasePart") or child:IsA("MeshPart") then
 					child.Anchored = false
+					child.CanCollide = true
+					child.Massless = false
+					child.CustomPhysicalProperties = LIGHT_DEBRIS_PROPERTIES
 				end
 			end
 
@@ -1778,18 +1796,32 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 			print("Ejected nested part:", nestedPart.Name, hasMobilePlayers and "- Mobile optimized" or "- Standard physics")
 		end
 
-		-- ลบ main part ทันที (และลบ children ที่เหลือทั้งหมดก่อน)
+		-- ลบ main part แบบ delayed เพื่อให้แน่ใจว่า children แยกตัวเสร็จ
 		if part and part.Parent then
-			-- ลบ children ที่เหลือทั้งหมด (ที่ไม่ได้อยู่ใน directChildren)
-			for _, remainingChild in ipairs(part:GetChildren()) do
-				if remainingChild:IsA("BasePart") or remainingChild:IsA("MeshPart") then
-					print(string.format("Cleaning up remaining child: %s from %s", remainingChild.Name, part.Name))
-					remainingChild:Destroy()
-				end
+			-- ทำเครื่องหมายว่ามองไม่เห็นและไม่สามารถโต้ตอบได้ก่อน
+			part.Transparency = 1
+			part.CanCollide = false
+			if part:IsA("BasePart") or part:IsA("MeshPart") then
+				part.Anchored = false
 			end
-			part:Destroy()
+
+			-- ลบแบบ delayed เพื่อให้แน่ใจว่า children แยกตัวเสร็จ
+			task.delay(1, function()
+				if part and part.Parent then
+					-- ล้าง children ที่เหลืออยู่
+					for _, remainingChild in ipairs(part:GetChildren()) do
+						if remainingChild:IsA("BasePart") or remainingChild:IsA("MeshPart") then
+							print(string.format("Cleaning up remaining child: %s from %s", remainingChild.Name, part.Name))
+							remainingChild:Destroy()
+						end
+					end
+					part:Destroy()
+					print("Main part", part.Name, "removed after delay")
+				end
+			end)
+		else
+			print("Main part", part.Name, "was already removed")
 		end
-		print("Main part", part.Name, "removed immediately")
 
 		return
 	end
@@ -1817,9 +1849,9 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 
 	-- Reduce connected parts for mobile optimization (keep only 30% of parts)
 	if hasMobilePlayers and #connectedPartsData > 3 then
-		local reducedCount = math.max(3, math.floor(#connectedPartsData * 0.3))
+		local connectedReducedCount = math.max(3, math.floor(#connectedPartsData * 0.3))
 		local tempConnected = {}
-		for i = 1, reducedCount do
+		for i = 1, connectedReducedCount do
 			table.insert(tempConnected, connectedPartsData[i])
 		end
 		connectedPartsData = tempConnected
