@@ -1716,6 +1716,13 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 			nestedPart.Massless = false -- เปลี่ยนเป็น false เพื่อให้มีมวล
 			nestedPart.CustomPhysicalProperties = LIGHT_DEBRIS_PROPERTIES
 
+			-- Unanchor ทุก Children ที่อยู่ข้างใน (MeshPart/BasePart)
+			for _, child in ipairs(nestedPart:GetDescendants()) do
+				if child:IsA("BasePart") or child:IsA("MeshPart") then
+					child.Anchored = false
+				end
+			end
+
 			-- ลดความแรงกระเด็นบน mobile เพื่อประหยัด physics และให้ตกเร็วขึ้น
 			local velocityMultiplier
 			if hasMobilePlayers then
@@ -1771,8 +1778,15 @@ drillCompleteRemote.OnServerEvent:Connect(function(player, partData, connectedPa
 			print("Ejected nested part:", nestedPart.Name, hasMobilePlayers and "- Mobile optimized" or "- Standard physics")
 		end
 
-		-- ลบ main part ทันที
+		-- ลบ main part ทันที (และลบ children ที่เหลือทั้งหมดก่อน)
 		if part and part.Parent then
+			-- ลบ children ที่เหลือทั้งหมด (ที่ไม่ได้อยู่ใน directChildren)
+			for _, remainingChild in ipairs(part:GetChildren()) do
+				if remainingChild:IsA("BasePart") or remainingChild:IsA("MeshPart") then
+					print(string.format("Cleaning up remaining child: %s from %s", remainingChild.Name, part.Name))
+					remainingChild:Destroy()
+				end
+			end
 			part:Destroy()
 		end
 		print("Main part", part.Name, "removed immediately")
