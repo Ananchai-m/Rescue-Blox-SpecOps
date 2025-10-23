@@ -57,6 +57,15 @@ AftershockSystem._rescueModelProvider = nil
 -- ตั้งค่า CollisionGroup สำหรับหิน
 local PhysicsService = game:GetService("PhysicsService")
 
+-- สร้าง Folder สำหรับเก็บ AftershockDebris
+local debrisFolder = workspace:FindFirstChild("AftershockDebris")
+if not debrisFolder then
+	debrisFolder = Instance.new("Folder")
+	debrisFolder.Name = "AftershockDebris"
+	debrisFolder.Parent = workspace
+	print("[Aftershock] Created AftershockDebris folder in workspace")
+end
+
 local function setupCollisionGroups()
 	-- สร้าง CollisionGroup สำหรับหิน Aftershock
 	pcall(function()
@@ -297,6 +306,13 @@ local function createFallingDebris()
 	debris.CanTouch = true
 	debris:SetAttribute("AftershockDebris", true)
 
+	-- Unanchor ทุก MeshPart ที่อยู่ข้างใน (Children)
+	for _, child in ipairs(debris:GetDescendants()) do
+		if child:IsA("BasePart") or child:IsA("MeshPart") then
+			child.Anchored = false
+		end
+	end
+
 	-- ตั้งค่า physics ให้หนักและตกเร็ว
 	pcall(function()
 		debris.CustomPhysicalProperties = PhysicalProperties.new(5.0, 0.3, 0.1, 1, 1)
@@ -327,10 +343,15 @@ local function dropRock(spawnPosition, targetPlayer, targetRescue, isMobile)
 	end
 
 	debris.CFrame = CFrame.new(spawnPosition)
-	debris.Parent = workspace
+	debris.Parent = debrisFolder -- ใส่ใน Folder แทน workspace โดยตรง
 	debris:SetNetworkOwner(nil)
 
 	print(string.format("[Aftershock] Debris spawned: %s at %s", debris.Name, tostring(debris.Position)))
+
+	-- ตั้งเวลาหาย (fallback) - กรณีไม่โดนอะไรเลย
+	local maxLifetime = isMobile and 5 or 10
+	Debris:AddItem(debris, maxLifetime)
+	print(string.format("[Aftershock] Debris fallback cleanup set to %ds", maxLifetime))
 
 	-- ให้ debris ตกแบบอิสระตาม physics (แรงโน้มถ่วงจะทำให้ตก)
 	-- เพิ่มการหมุนสุ่มเล็กน้อย
@@ -350,6 +371,9 @@ local function dropRock(spawnPosition, targetPlayer, targetRescue, isMobile)
 		if hit:IsDescendantOf(debris) then
 			return
 		end
+
+		-- Debug: แสดงทุกอย่างที่ debris โดน
+		print(string.format("[Aftershock] Debris touched: %s (CanCollide: %s)", hit.Name, tostring(hit.CanCollide)))
 
 		local hitModel = hit:FindFirstAncestorOfClass("Model")
 		if hitModel and (hitModel == targetRescue or hitModel.Name:match("_Rescue$")) then
@@ -376,25 +400,18 @@ local function dropRock(spawnPosition, targetPlayer, targetRescue, isMobile)
 				connection:Disconnect()
 			end
 
-			-- ถ้าเป็น mobile ให้ลบ debris เร็วขึ้น
+			-- ลบ debris หลังจากหยุด
+			local lifetime = 3 -- PC: 3 วินาที
 			if isMobile then
-				local lifetime = GameConfig.MOBILE_PERFORMANCE.DEBRIS_LIFETIME
-				print(string.format("[Aftershock] Mobile mode - debris will be removed in %.1fs", lifetime))
-				Debris:AddItem(debris, lifetime)
-			else
-				-- PC: ไม่ลบ debris ให้อยู่ไปเลย
-				-- Debris:AddItem(debris, 10)
+				lifetime = GameConfig.MOBILE_PERFORMANCE.DEBRIS_LIFETIME -- Mobile: 1.5 วินาที
 			end
+			print(string.format("[Aftershock] Debris will be removed in %.1fs", lifetime))
+			Debris:AddItem(debris, lifetime)
 		else
 			-- โดนสิ่งอื่นๆ (Meshes, BaseFloor2, ฯลฯ) - ให้ผ่านไป (ไม่ทำอะไร)
-			-- print(string.format("[Aftershock] Debris passing through: %s", hit.Name))
+			print(string.format("[Aftershock] Debris passing through: %s (ignoring)", hit.Name))
 		end
 	end)
-
-	-- Safety: ถ้า mobile ให้ลบหลัง 5 วินาทีอยู่ดี (กรณีไม่โดนอะไรเลย)
-	if isMobile then
-		Debris:AddItem(debris, 5)
-	end
 end
 
 local function triggerAftershock()
