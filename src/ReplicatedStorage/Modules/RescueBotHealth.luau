@@ -493,13 +493,17 @@ function RescueBotHealth:_onDeath()
 
 					botDeathEvent:FireClient(player, "timeout")
 
-					-- Fire BotTimeout event เพื่อให้ server handler จัดการ
-					local botTimeoutEvent = remoteEvents:FindFirstChild("BotTimeout")
-					if botTimeoutEvent and botTimeoutEvent:IsA("BindableEvent") then
-						botTimeoutEvent:Fire(player)
-					end
-
 					warn(`[RescueBotHealth] Player {player.Name} timeout - RescueBot EXPLODED!`)
+
+					-- รอ 3 วินาทีให้เห็นหุ่นกระจายก่อนแสดงสกอร์บอร์ด
+					task.delay(3, function()
+						-- Fire BotTimeout event เพื่อให้ server handler แสดงสกอร์บอร์ด
+						local botTimeoutEvent = remoteEvents:FindFirstChild("BotTimeout")
+						if botTimeoutEvent and botTimeoutEvent:IsA("BindableEvent") then
+							botTimeoutEvent:Fire(player)
+							print(`[RescueBotHealth] Showing scoreboard after explosion for {player.Name}`)
+						end
+					end)
 				end
 			end)
 		end
