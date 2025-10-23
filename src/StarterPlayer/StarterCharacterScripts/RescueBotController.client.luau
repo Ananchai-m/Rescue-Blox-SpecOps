@@ -1278,6 +1278,32 @@ local function startOriginalRescueMode()
 	if character and character.PrimaryPart and character:FindFirstChild("Humanoid") then
 		print("Setting up original Rescue Mode...")
 
+		-- ซ่อนปุ่ม Reset Character ใน CoreGui
+		local StarterGui = game:GetService("StarterGui")
+		pcall(function()
+			StarterGui:SetCore("ResetButtonCallback", false)
+			print("[RescueBotController] Disabled Reset button for", player.Name)
+		end)
+
+		-- ป้องกันการ Respawn เมื่อตาย (ใช้ CharacterAdded event)
+		local characterAddedConnection
+		characterAddedConnection = player.CharacterAdded:Connect(function(newCharacter)
+			-- ถ้ายังอยู่ในโหมด Rescue และไม่ใช่ character เดิม ให้ลบทิ้ง
+			if isInOriginalRescueMode and newCharacter ~= character then
+				newCharacter:Destroy()
+				print("[RescueBotController] Prevented respawn for", player.Name)
+			else
+				-- ถ้าออกจากโหมด Rescue แล้ว ให้ disconnect
+				if characterAddedConnection then
+					characterAddedConnection:Disconnect()
+					characterAddedConnection = nil
+				end
+			end
+		end)
+
+		-- เก็บ connection เพื่อ disconnect ภายหลัง
+		connections.preventRespawn = characterAddedConnection
+
 		-- ตรวจสอบว่าผู้เล่น freeze อยู่แล้วหรือยัง (จาก game ready)
 		-- ถ้ายัง ให้ freeze และย้ายไปที่ Simu
 		if not character.Humanoid.PlatformStand then
@@ -1351,6 +1377,12 @@ local function startOriginalRescueMode()
 end
 
 local function stopOriginalRescueMode()
+	-- ยกเลิกการป้องกัน Respawn (แต่ยังไม่เปิดปุ่ม Reset - รอกลับ Lobby ก่อน)
+	if connections.preventRespawn then
+		connections.preventRespawn:Disconnect()
+		connections.preventRespawn = nil
+	end
+
 	if connections.originalRescueControl then
 		connections.originalRescueControl:Disconnect()
 		connections.originalRescueControl = nil
@@ -1717,6 +1749,13 @@ waitingSystemRemote.OnClientEvent:Connect(function(action, ...)
 
 		-- คืนค่า mouse behavior กลับเป็นปกติ
 		resetMouseBehavior()
+
+		-- เปิดปุ่ม Reset Character กลับเมื่อกลับ Lobby
+		local StarterGui = game:GetService("StarterGui")
+		pcall(function()
+			StarterGui:SetCore("ResetButtonCallback", true)
+			print("[RescueBotController] Re-enabled Reset button for", player.Name)
+		end)
 
 		-- ล้างสถานะเกมทั้งหมด
 		playerInGame = false
