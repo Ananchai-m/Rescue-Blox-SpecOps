@@ -627,8 +627,8 @@ local function fadeDrillSound()
 
 	isFadingOut = true
 	local sound = currentDrillSound -- เก็บ reference
-	local fadeTime = 0.1 -- ลดเหลือ 0.1 วินาที (100ms) เพื่อให้เร็วขึ้น
-	local steps = 3 -- ลดเหลือ 3 steps
+	local fadeTime = 0.3 -- เพิ่มเวลา fade เป็น 0.3 วินาที เพื่อให้นุ่มนวล
+	local steps = 10 -- เพิ่ม steps เป็น 10 เพื่อให้ fade นุ่มนวลขึ้น
 	local stepTime = fadeTime / steps
 	local startVolume = sound.Volume
 	local volumeDecrement = startVolume / steps
@@ -1176,12 +1176,12 @@ drillSoundRemote.OnClientEvent:Connect(function(otherPlayer, action)
 				return -- ยังไม่ถึงเวลา (อาจจะมีสัญญาณใหม่เข้ามา)
 			end
 
-			-- Fade out and stop sound (เร็วขึ้นเหมือนตัวเอง)
+			-- Fade out and stop sound (นุ่มนวลเหมือนตัวเอง)
 			if otherPlayersDrillSounds[playerKey] then
 				local sound = otherPlayersDrillSounds[playerKey]
 				local startVolume = sound.Volume
-				local fadeTime = 0.1 -- ลดเหลือ 0.1 วินาที เหมือนตัวเอง
-				local steps = 3 -- ลดเหลือ 3 steps เหมือนตัวเอง
+				local fadeTime = 0.9 -- เพิ่มเป็น 0.3 วินาที เพื่อให้นุ่มนวล
+				local steps = 10 -- เพิ่มเป็น 10 steps เพื่อให้ fade นุ่มนวล
 				local stepTime = fadeTime / steps
 				local volumeDecrement = startVolume / steps
 
@@ -1190,6 +1190,10 @@ drillSoundRemote.OnClientEvent:Connect(function(otherPlayer, action)
 						-- ถ้ามีสัญญาณ start ใหม่ ให้ยกเลิก fade
 						local currentTime = tick()
 						if currentTime - (otherPlayersLastSoundTime[playerKey] or 0) < 0.15 then
+							-- คืนค่า volume
+							if sound and sound.Parent then
+								sound.Volume = 0.4
+							end
 							return -- มีสัญญาณใหม่เข้ามา ยกเลิก fade
 						end
 
