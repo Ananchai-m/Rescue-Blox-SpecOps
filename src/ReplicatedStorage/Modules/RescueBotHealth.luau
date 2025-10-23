@@ -472,6 +472,18 @@ function RescueBotHealth:_onDeath()
 			-- ส่งสัญญาณตายและซ่อน DrillProgressGui
 			botDeathEvent:FireClient(player, "died")
 
+			-- แจ้งเตือนผู้เล่นคนอื่นว่าเพื่อนล้ม (สำหรับแสดง Beam)
+			local teammateDownRemote = remoteEvents:FindFirstChild("TeammateDown")
+			if teammateDownRemote then
+				-- ส่งให้ทุกคนยกเว้นผู้เล่นที่ล้ม
+				for _, otherPlayer in pairs(Players:GetPlayers()) do
+					if otherPlayer ~= player then
+						teammateDownRemote:FireClient(otherPlayer, player, typedSelf.rescueModel)
+						print(string.format("[RescueBotHealth] Notified %s that %s is down", otherPlayer.Name, player.Name))
+					end
+				end
+			end
+
 			-- เริ่มนับถอยหลัง 30 วินาที
 			task.delay(30, function()
 				-- ถ้ายังไม่ฟื้น (HP ยังเป็น 0) ให้สรุปคะแนนและระเบิด

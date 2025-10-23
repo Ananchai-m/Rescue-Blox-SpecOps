@@ -52,6 +52,7 @@ local updateBatteryRemote = getOrCreateRemote("UpdateBattery")
 local debugModifyHPRemote = getOrCreateRemote("DebugModifyHP")
 local drillEffectRemote = getOrCreateRemote("DrillEffect")
 local deviceTypeRemote = getOrCreateRemote("DeviceType")
+local teammateDownRemote = getOrCreateRemote("TeammateDown")
 local CompanionFollower = require(script.Parent:WaitForChild("CompanionFollower"))
 
 -- Track mobile players for physics optimization
