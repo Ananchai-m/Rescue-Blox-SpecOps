@@ -53,10 +53,17 @@ local debugModifyHPRemote = getOrCreateRemote("DebugModifyHP")
 local drillEffectRemote = getOrCreateRemote("DrillEffect")
 local deviceTypeRemote = getOrCreateRemote("DeviceType")
 local teammateDownRemote = getOrCreateRemote("TeammateDown")
-local CompanionFollower = require(script.Parent:WaitForChild("CompanionFollower"))
+local _aftershockWarningRemote = getOrCreateRemote("AftershockWarning")
 
 -- Track mobile players for physics optimization
 local mobilePlayersList = {}
+
+-- Import CompanionFollower and AftershockSystem after RemoteEvents are created
+local CompanionFollower = require(script.Parent:WaitForChild("CompanionFollower"))
+local AftershockSystem = require(script.Parent:WaitForChild("AftershockSystem"))
+
+-- Initialize AftershockSystem to connect RemoteEvents
+AftershockSystem.init()
 
 -- Import VictimSpawner, GameConfig, GameSummary, and RescueBotHealth
 local VictimSpawner = require(ReplicatedStorage.Modules.VictimSpawner)
@@ -185,6 +192,28 @@ local originalRescueConnections = {}
 local drillDebounce = {}
 local companionFollowers = {}
 local rescueBotHealthInstances = {} -- เก็บ RescueBotHealth instances
+local activeGamePlayers = {}
+
+AftershockSystem.setActivePlayersProvider(function()
+	local playersInGame = {}
+	for player in pairs(activeGamePlayers) do
+		if player and player.Parent == Players then
+			table.insert(playersInGame, player)
+		end
+	end
+	return playersInGame
+end)
+
+AftershockSystem.setRescueModelProvider(function(player)
+	return playerOriginalRescue[player]
+end)
+
+AftershockSystem.setDamageHandler(function(player, damage, damageType)
+	local healthInstance = rescueBotHealthInstances[player]
+	if healthInstance then
+		healthInstance:TakeDamage(damage, damageType or "Aftershock Rockfall")
+	end
+end)
 
 -- Server-side Waiting System variables
 local waitingPlayers = {}
@@ -1483,6 +1512,11 @@ end)
 
 -- Player left cleanup
 Players.PlayerRemoving:Connect(function(player)
+	activeGamePlayers[player] = nil
+	if next(activeGamePlayers) == nil then
+		AftershockSystem.stop()
+	end
+
 	if playerVehicles[player] then
 		playerVehicles[player]:Destroy()
 		playerVehicles[player] = nil
@@ -1992,6 +2026,20 @@ local function startGame()
 	print("Server: Starting game with " .. #waitingPlayers .. " players!")
 	isGamePlaying = true
 
+	if table.clear then
+		table.clear(activeGamePlayers)
+	else
+		for player in pairs(activeGamePlayers) do
+			activeGamePlayers[player] = nil
+		end
+	end
+
+	for _, player in ipairs(waitingPlayers) do
+		if player and player.Parent == Players then
+			activeGamePlayers[player] = true
+		end
+	end
+
 	-- Reset HP และ Battery ของทุก RescueBot
 	for player, healthInstance in pairs(rescueBotHealthInstances) do
 		if healthInstance then
@@ -2043,6 +2091,14 @@ local function startGame()
 
 	print(string.format("[Server] Starting game with %d players - Duration: %d seconds", playerCount, gameDuration))
 
+	if next(activeGamePlayers) ~= nil then
+		AftershockSystem.start({
+			gameDuration = gameDuration,
+		})
+	else
+		AftershockSystem.stop()
+	end
+
 	-- เริ่ม Battery drain สำหรับ RescueBot ทั้งหมด
 	for player, healthInstance in pairs(rescueBotHealthInstances) do
 		if healthInstance then
@@ -2074,6 +2130,15 @@ local function endGame()
 	if not isGamePlaying then return end -- ป้องกันการเรียกซ้ำ
 
 	isGamePlaying = false
+
+	AftershockSystem.stop()
+	if table.clear then
+		table.clear(activeGamePlayers)
+	else
+		for player in pairs(activeGamePlayers) do
+			activeGamePlayers[player] = nil
+		end
+	end
 
 	-- ตรวจสอบจำนวน victims ที่ช่วยได้
 	local totalVictims = VictimSpawner.getTotalVictimCount()

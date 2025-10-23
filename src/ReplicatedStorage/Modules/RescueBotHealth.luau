@@ -279,6 +279,11 @@ function RescueBotHealth:_setupCollisionDetection()
 
 		local currentTime = tick()
 
+		if hit:GetAttribute("AftershockRock") then
+			hitParts[hit] = currentTime
+			return
+		end
+
 		-- ป้องกันโดนซ้ำจาก part เดิม
 		local lastHitTime = hitParts[hit]
 		if lastHitTime and currentTime - lastHitTime < 2 then
