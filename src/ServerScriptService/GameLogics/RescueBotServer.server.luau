@@ -1177,6 +1177,28 @@ spawnOriginalRescueEvent.OnServerEvent:Connect(function(player, position)
 		print("Stopped drill before spawning new rescue vehicle for", player.Name)
 	end
 
+	-- ลบ RescueCompanion ก่อน spawn Rescue หลัก
+	local companionName = player.Name .. "_RescueCompanion"
+	local companionModel = workspace:FindFirstChild(companionName)
+	if companionModel then
+		companionModel:Destroy()
+		print("Destroyed RescueCompanion before spawning Rescue for", player.Name)
+	end
+
+	-- ลบจาก playerVehicles ด้วย (ถ้ามี companion อยู่)
+	if playerVehicles[player] then
+		playerVehicles[player]:Destroy()
+		playerVehicles[player] = nil
+		print("Cleared companion from playerVehicles for", player.Name)
+	end
+
+	-- หยุด companion follower
+	if companionFollowers[player] then
+		companionFollowers[player].running = false
+		companionFollowers[player] = nil
+		print("Stopped companion follower for", player.Name)
+	end
+
 	-- ลบ original rescue model เก่า (ถ้ามี)
 	if playerOriginalRescue[player] then
 		playerOriginalRescue[player]:Destroy()
