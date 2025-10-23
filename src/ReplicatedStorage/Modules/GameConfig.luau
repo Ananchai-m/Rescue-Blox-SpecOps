@@ -38,7 +38,7 @@ GameConfig.PLAYER_MODES = {
 -- Waiting System Settings
 GameConfig.WAITING_SYSTEM = {
 	maxPlayers = 5, -- รองรับ 1-5 ผู้เล่น (ตาม PLAYER_MODES)
-	lobbyTimeout = 60 -- seconds to wait before auto-starting with minimum players
+	lobbyTimeout = 5 -- seconds to wait before auto-starting with minimum players
 }
 
 -- Coin System Settings
