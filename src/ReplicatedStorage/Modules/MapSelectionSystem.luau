@@ -43,9 +43,9 @@ end
 -- ข้อมูล Map ทั้งหมด
 local maps = {
 	{
-		name = "City Rescue",
-		image = "rbxasset://textures/ui/GuiImagePlaceholder.png", -- ใส่ Asset ID ของรูป Map
-		description = "Urban rescue mission in the city",
+		name = "EarthQuake",
+		image = "rbxassetid://139870422489567",
+		description = "Earthquake disaster rescue mission",
 		isAvailable = true -- Map นี้โหวตได้
 	},
 	{
@@ -153,7 +153,7 @@ local function createMapSelectionUI()
 		mapImage.Image = map.image
 		mapImage.ScaleType = Enum.ScaleType.Crop
 		mapImage.Parent = mapFrame
-		
+
 		-- Corner สำหรับ Image
 		local imageCorner = Instance.new("UICorner")
 		imageCorner.CornerRadius = GameConfig.UI.mapSelectioCornerRadius
