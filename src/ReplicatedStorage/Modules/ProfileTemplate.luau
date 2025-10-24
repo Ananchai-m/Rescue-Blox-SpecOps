@@ -27,7 +27,8 @@ export type PlayerProfile = {
 	meta: {
 		version: number,
 		createdAt: number,
-		lastSeenAt: number
+		lastSeenAt: number,
+		hasWatchedIntro: boolean?
 	},
 	identity: {
 		userId: number,
@@ -74,7 +75,8 @@ function ProfileTemplate.new(player: Player): PlayerProfile
 		meta = {
 			version = 1,
 			createdAt = now,
-			lastSeenAt = now
+			lastSeenAt = now,
+			hasWatchedIntro = false
 		},
 		identity = {
 			userId = player.UserId,
